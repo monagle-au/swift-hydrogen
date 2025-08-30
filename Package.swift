@@ -4,7 +4,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "hydrogen",
+    name: "swift-hydrogen",
     platforms: [
         .macOS(.v15),
     ],
