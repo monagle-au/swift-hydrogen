@@ -6,7 +6,6 @@
 //
 
 import PostgresNIO
-@_exported @preconcurrency import UUIDKit
 
 public protocol PostgresMigration {
     var name: String { get }
