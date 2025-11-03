@@ -43,6 +43,7 @@ let package = Package(
         .target(
             name: "HydrogenPostgres",
             dependencies: [
+                "Hydrogen",
                 .product(name: "PostgresNIO", package: "postgres-nio"),
                 .product(name: "UUIDKit", package: "uuid-kit"),
             ]
