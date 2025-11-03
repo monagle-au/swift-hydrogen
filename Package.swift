@@ -25,7 +25,6 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.2.1"),
         
         // Postgres
-        .package(url: "https://github.com/monagle-au/uuid-kit", from: "1.0.0"),
         .package(url: "https://github.com/vapor/postgres-nio.git", from: "1.27.0"),
     ],
     targets: [
@@ -45,7 +44,6 @@ let package = Package(
             dependencies: [
                 "Hydrogen",
                 .product(name: "PostgresNIO", package: "postgres-nio"),
-                .product(name: "UUIDKit", package: "uuid-kit"),
             ]
         ),
         .testTarget(

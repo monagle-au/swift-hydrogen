@@ -13,8 +13,7 @@ public enum PostgresMigrator {
         try await client.query(
             """
             CREATE TABLE IF NOT EXISTS _migrations (
-                id UUID PRIMARY KEY,
-                name VARCHAR UNIQUE NOT NULL,
+                name VARCHAR UNIQUE PRIMARY KEY,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
             """
@@ -26,7 +25,7 @@ public enum PostgresMigrator {
         logger.info("Inserting migration for \(String(reflecting: migration))")
         try await connection.query(
             """
-            INSERT INTO _migrations (id,name) VALUES (\(migration.uuid),\(migration.name))
+            INSERT INTO _migrations (name) VALUES (\(migration.name))
             """
             , logger: logger
         )
@@ -35,7 +34,7 @@ public enum PostgresMigrator {
     static func checkMigrationRow(_ migration: PostgresMigration, on client: PostgresClient, logger: Logger) async throws -> Bool {
         let rows = try await client.query(
             """
-            SELECT EXISTS(SELECT 1 FROM _migrations WHERE id=\(migration.uuid))
+            SELECT EXISTS(SELECT 1 FROM _migrations WHERE name=\(migration.name))
             """
             , logger: logger
         )
