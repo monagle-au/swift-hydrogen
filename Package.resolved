@@ -1,5 +1,5 @@
 {
-  "originHash" : "04502b75c545696c991b7a883ab0b70ab7b56b96c70be8bd55c21cbf543ad204",
+  "originHash" : "fcb39133f23fb3ca10e6e8c3c63faa33f3c116c95203d2a247dd394fbb9fee41",
   "pins" : [
     {
       "identity" : "postgres-nio",
@@ -143,15 +143,6 @@
       "state" : {
         "revision" : "890830fff1a577dc83134890c7984020c5f6b43b",
         "version" : "1.6.2"
-      }
-    },
-    {
-      "identity" : "uuid-kit",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/monagle-au/uuid-kit",
-      "state" : {
-        "revision" : "40ce45e5cca377b5b3f1444435d3ddf732b91ab7",
-        "version" : "1.1.0"
       }
     }
   ],
