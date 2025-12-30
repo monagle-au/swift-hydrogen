@@ -7,7 +7,7 @@
 
 import PostgresNIO
 
-public protocol PostgresMigration {
+public protocol PostgresMigration: Sendable {
     var name: String { get }
     var queries: [PostgresQuery] { get }
 }
