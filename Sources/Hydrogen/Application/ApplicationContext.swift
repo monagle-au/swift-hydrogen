@@ -22,19 +22,15 @@ public final class ApplicationContext {
         self.registry = registry
     }
 
-    public func resolve<K: ApplicationResourceKey>(_ key: K.Type) throws -> K.Value {
-        if let v = cached[key.id] as? K.Value { return v }
+    public func resolve<R: ApplicationResource>(_ key: R.Type) throws -> R.Value {
+        if let v = cached[key.id] as? R.Value { return v }
 
-        guard let def = registry.resource(key) else {
-            throw ApplicationRunner.Error.missingResource(K.name)
+        guard registry.resource(key) != nil else {
+            throw ApplicationRunner.Error.missingResource(R.name)
         }
 
-        let built = try def.build(self)
-        guard let typed = built as? K.Value else {
-            throw ApplicationRunner.Error.resourceTypeMismatch(K.name)
-        }
-
-        cached[key.id] = typed
-        return typed
+        let built = try key.build(context: self)
+        cached[key.id] = built
+        return built
     }
 }

@@ -13,13 +13,37 @@ import ServiceLifecycle
     public init(context: ApplicationContext) {
         self.context = context
     }
+    
+    /// Bootstrap an ApplicationRunner with resources and services
+    public static func bootstrap(
+        identifier: String,
+        config: ConfigReader,
+        resources: [any ApplicationResource.Type] = [],
+        services: [any ApplicationService.Type] = []
+    ) -> ApplicationRunner {
+        var builder = ApplicationRegistryBuilder()
+        
+        // Register all resources
+        for resource in resources {
+            builder.register(resource)
+        }
+        
+        // Register all services
+        for service in services {
+            builder.register(service)
+        }
+        
+        let registry = builder.build()
+        let context = ApplicationContext(identifier: identifier, config: config, registry: registry)
+        return ApplicationRunner(context: context)
+    }
 
-    public func run(_ roots: [ApplicationServiceKey]) async throws {
+    public func run(_ roots: [any ApplicationService.Type]) async throws {
         let configs: [ServiceGroupConfiguration.ServiceConfiguration] = try await MainActor.run {
             let ordered = try topoSortedClosure(for: roots)
-            return try ordered.map { key in
-                guard let def = context.registry.service(key) else {
-                    throw Error.missingService(key.rawValue)
+            return try ordered.map { serviceType in
+                guard let def = context.registry.service(serviceType) else {
+                    throw Error.missingService(String(describing: serviceType))
                 }
 
                 let svc = try def.build(context)
@@ -36,26 +60,29 @@ import ServiceLifecycle
         try await ServiceGroup(configuration: .init(services: configs, logger: logger)).run()
     }
 
-    private func topoSortedClosure(for roots: [ApplicationServiceKey]) throws -> [ApplicationServiceKey] {
-        var visited = Set<ApplicationServiceKey>()
-        var temp = Set<ApplicationServiceKey>()
-        var result: [ApplicationServiceKey] = []
+    private func topoSortedClosure(for roots: [any ApplicationService.Type]) throws -> [any ApplicationService.Type] {
+        var visited = Set<Int>()
+        var temp = Set<Int>()
+        var result: [any ApplicationService.Type] = []
 
-        func visit(_ key: ApplicationServiceKey, path: [ApplicationServiceKey]) throws {
-            if visited.contains(key) { return }
-            if temp.contains(key) {
-                throw Error.cyclicDependency((path + [key]))
+        func visit(_ serviceType: any ApplicationService.Type, path: [any ApplicationService.Type]) throws {
+            let id = serviceType.id
+            if visited.contains(id) { return }
+            if temp.contains(id) {
+                throw Error.cyclicDependency((path + [serviceType]).map { String(describing: $0) })
             }
-            temp.insert(key)
+            temp.insert(id)
 
-            guard let def = context.registry.service(key) else {
-                throw Error.missingService(key.rawValue)
+            guard let def = context.registry.service(serviceType) else {
+                throw Error.missingService(String(describing: serviceType))
             }
-            for dep in def.dependencies { try visit(dep, path: path + [key]) }
+            for dep in def.dependencies { 
+                try visit(dep, path: path + [serviceType]) 
+            }
 
-            temp.remove(key)
-            visited.insert(key)
-            result.append(key)
+            temp.remove(id)
+            visited.insert(id)
+            result.append(serviceType)
         }
 
         for r in roots { try visit(r, path: []) }
@@ -66,14 +93,14 @@ extension ApplicationRunner {
     public enum Error: Swift.Error, CustomStringConvertible {
         case missingService(String)
         case missingResource(String)
-        case cyclicDependency([ApplicationServiceKey])
+        case cyclicDependency([String])
         case resourceTypeMismatch(String)
 
         public var description: String {
             switch self {
             case .missingService(let k): "Missing service registration: \(k)"
             case .missingResource(let k): "Missing resource registration: \(k)"
-            case .cyclicDependency(let path): "Cyclic dependency detected: \(path.map(\.rawValue).joined(separator: " -> "))"
+            case .cyclicDependency(let path): "Cyclic dependency detected: \(path.joined(separator: " -> "))"
             case .resourceTypeMismatch(let resource): "Mismatched value type for resource: \(resource)"
             }
         }
