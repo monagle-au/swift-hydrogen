@@ -7,10 +7,6 @@
 
 import ServiceContextModule
 
-private enum EnvironmentContextKey: ServiceContextKey {
-    typealias Value = Environment
-}
-
 extension ServiceContext {
     /// The `Environment` associated with this `ServiceContext`.
     public var environment: Environment? {
@@ -20,5 +16,9 @@ extension ServiceContext {
         get {
             self[EnvironmentContextKey.self]
         }
+    }
+    
+    private enum EnvironmentContextKey: ServiceContextKey {
+        typealias Value = Environment
     }
 }
