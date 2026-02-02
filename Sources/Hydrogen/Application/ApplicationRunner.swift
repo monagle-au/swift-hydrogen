@@ -38,7 +38,7 @@ import ServiceLifecycle
         return ApplicationRunner(context: context)
     }
 
-    public func run(_ roots: [any ApplicationService.Type]) async throws {
+    public func run(_ roots: any ApplicationService.Type ...) async throws {
         let configs: [ServiceGroupConfiguration.ServiceConfiguration] = try await MainActor.run {
             let ordered = try topoSortedClosure(for: roots)
             return try ordered.map { serviceType in
@@ -54,9 +54,8 @@ import ServiceLifecycle
                 return cfg
             }
         }
-        // TODO: Pull this from the logger resource
+        
         let logger = Logger(label: "service-lifecycle")
-
         try await ServiceGroup(configuration: .init(services: configs, logger: logger)).run()
     }
 
