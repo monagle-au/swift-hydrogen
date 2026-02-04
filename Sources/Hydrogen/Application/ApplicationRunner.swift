@@ -39,6 +39,10 @@ import ServiceLifecycle
     }
 
     public func run(_ roots: any ApplicationService.Type ...) async throws {
+        try await self.run(roots)
+    }
+    
+    public func run(_ roots: [any ApplicationService.Type]) async throws {
         let configs: [ServiceGroupConfiguration.ServiceConfiguration] = try await MainActor.run {
             let ordered = try topoSortedClosure(for: roots)
             return try ordered.map { serviceType in
