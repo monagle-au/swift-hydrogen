@@ -30,11 +30,12 @@ public struct Environment: Sendable, Equatable {
     
     /// Creates a new `Environment` from parsed CLI arguments.
     ///
-    /// If `arguments.environment` is `nil`, this defaults to `"development"`.
+    /// returns nil if environment is not set in the arguments
     ///
     /// - Parameter arguments: Parsed command-line arguments.
-    public init(arguments: Arguments) {
-        self.init(name: arguments.environment ?? "development")
+    public init?(arguments: Arguments) {
+        guard let env = arguments.environment else { return nil }
+        self.init(name: env)
     }
 
     // MARK: - Presets

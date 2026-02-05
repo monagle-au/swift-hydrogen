@@ -11,3 +11,4 @@
 @_exported import Tracing
 @_exported import Metrics
 @_exported import ArgumentParser
+@_exported import Configuration

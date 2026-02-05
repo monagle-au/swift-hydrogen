@@ -17,11 +17,12 @@ let package = Package(
     ],
     dependencies: [
         // Hydrogen
-        .package(url: "https://github.com/apple/swift-log.git", from: "1.6.4"),
-        .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.8.0"),
+        .package(url: "https://github.com/apple/swift-configuration", from: "1.0.0"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.6.1"),
-        .package(url: "https://github.com/apple/swift-metrics.git", from: "2.7.0"),
+        .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.8.0"),
         .package(url: "https://github.com/apple/swift-service-context.git", from: "1.2.1"),
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.6.4"),
+        .package(url: "https://github.com/apple/swift-metrics.git", from: "2.7.0"),
         .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.2.1"),
         
         // Postgres
@@ -33,10 +34,13 @@ let package = Package(
         .target(
             name: "Hydrogen",
             dependencies: [
+                .product(name: "Configuration", package: "swift-configuration"),
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
-                .product(name: "Tracing", package: "swift-distributed-tracing"),
+                .product(name: "ServiceContextModule", package: "swift-service-context"),
+                .product(name: "Logging", package: "swift-log"),
                 .product(name: "Metrics", package: "swift-metrics"),
+                .product(name: "Tracing", package: "swift-distributed-tracing"),
             ]
         ),
         .target(
@@ -44,6 +48,7 @@ let package = Package(
             dependencies: [
                 "Hydrogen",
                 .product(name: "PostgresNIO", package: "postgres-nio"),
+                .product(name: "ServiceContextModule", package: "swift-service-context"),
             ]
         ),
         .testTarget(
