@@ -381,9 +381,11 @@ struct ApplicationRunnerIntegrationTests {
             static var defaultValue: Int { -1 }
         }
 
+        struct NopCommand: AsyncParsableCommand {}
+
         struct TestApp: HydrogenApplication {
+            typealias RootCommand = NopCommand
             static let identifier = "test-app"
-            static var commands: [any AsyncParsableCommand.Type] { [] }
 
             static func configure(_ services: inout ServiceRegistry) {
                 services.register(
