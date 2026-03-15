@@ -65,11 +65,21 @@ public protocol HydrogenCommand: AsyncParsableCommand {
     ///
     /// - Parameter services: A snapshot of the built service values.
     func execute(with services: ServiceValues) async throws
+
+    /// The lifecycle mode for this command.
+    ///
+    /// Defaults to `.persistent`. ``TaskCommand`` overrides this to `.task`.
+    /// You rarely need to set this directly — prefer conforming to ``PersistentCommand``
+    /// or ``TaskCommand`` instead.
+    var lifecycleMode: ServiceLifecycleMode { get }
 }
 
 extension HydrogenCommand {
     /// Default no-op execute — appropriate for persistent commands.
     public func execute(with services: ServiceValues) async throws {}
+
+    /// Default lifecycle mode — persistent.
+    public var lifecycleMode: ServiceLifecycleMode { .persistent }
 
     /// Default `run()` implementation wired into ArgumentParser.
     ///
@@ -80,7 +90,7 @@ extension HydrogenCommand {
     /// 3. Calls `App.configure(_:)` to populate a ``ServiceRegistry``.
     /// 4. Creates an ``ApplicationRunner`` and invokes ``ApplicationRunner/run(requiredServices:mode:execute:)``.
     ///
-    /// The lifecycle mode is inferred from whether `self` conforms to ``TaskCommand``.
+    /// The lifecycle mode is determined by `lifecycleMode`, which ``TaskCommand`` sets to `.task`.
     public func run() async throws {
         let environment = ServiceContext.active.environment ?? .development
         let config = ConfigReader(provider: EnvironmentVariablesProvider())
@@ -99,7 +109,7 @@ extension HydrogenCommand {
 
         let requiredServicesCopy = requiredServices
 
-        if self is any TaskCommand {
+        if lifecycleMode == .task {
             // Task mode: wrap execute in a CommandExecutionService.
             // We cannot capture `self` (non-Sendable existential) in a @Sendable closure,
             // so we resolve the execute closure into a concrete @Sendable wrapper.
@@ -109,7 +119,7 @@ extension HydrogenCommand {
             let noExecute: (@Sendable (ServiceValues) async throws -> Void)? = nil
             try await runner.run(
                 requiredServices: requiredServicesCopy,
-                mode: ServiceLifecycleMode.persistent,
+                mode: .persistent,
                 execute: noExecute
             )
         }
@@ -133,7 +143,7 @@ extension HydrogenCommand {
         }
         try await runner.run(
             requiredServices: requiredServices,
-            mode: ServiceLifecycleMode.task,
+            mode: .task,
             execute: executeClosure
         )
     }
@@ -182,4 +192,9 @@ public protocol TaskCommand: HydrogenCommand {
     ///
     /// - Parameter services: A snapshot of the built service values.
     func execute(with services: ServiceValues) async throws
+}
+
+extension TaskCommand {
+    /// Task commands always use `.task` lifecycle mode.
+    public var lifecycleMode: ServiceLifecycleMode { .task }
 }
