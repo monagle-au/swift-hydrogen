@@ -2,433 +2,490 @@
 //  ApplicationRunnerTests.swift
 //  swift-hydrogen
 //
-//  Tests demonstrating ApplicationRunner usage patterns
+//  Tests for ApplicationRunner: dependency resolution, lifecycle modes, and error cases.
 //
 
 import Testing
 import ServiceLifecycle
+import Logging
+import Configuration
 @testable import Hydrogen
 
-// MARK: - Test Resources
+// MARK: - Service Keys
 
-/// A mock database resource for testing
-private struct MockDatabaseResource: ApplicationResource {
-    static var name: String { "database" }
-    
-    typealias Value = MockDatabase
-    
-    @MainActor static func build(context: ApplicationContext) throws -> MockDatabase {
-        // In a real app, you'd read from config
-        let host = context.config.string(forKey: "database.host", default: "localhost")
-        let port = context.config.int(forKey: "database.port", default: 5432)
-        return MockDatabase(host: host, port: port)
-    }
+private struct AKey: ServiceKey {
+    static var defaultValue: String { "" }
 }
 
-private struct MockDatabase: Sendable {
-    let host: String
-    let port: Int
+private struct BKey: ServiceKey {
+    static var defaultValue: String { "" }
 }
 
-/// A mock logger resource for testing
-private struct MockLoggerResource: ApplicationResource {
-    static var name: String { "logger" }
-    
-    typealias Value = Logger
-    
-    @MainActor static func build(context: ApplicationContext) throws -> Logger {
-        return Logger(label: context.identifier)
-    }
+private struct CKey: ServiceKey {
+    static var defaultValue: String { "" }
 }
 
-// MARK: - Test Services
+// MARK: - Mock Services
 
-/// A mock HTTP server service that completes quickly for testing
-private struct MockHTTPServerService: ApplicationService {
-    static let dependencies: [any ApplicationService.Type] = []
-    
-    let logger: Logger
-    let database: MockDatabase
-    var completed = false
-    
-    @MainActor static func build(context: ApplicationContext) throws -> MockHTTPServerService {
-        let logger = try context.resolve(MockLoggerResource.self)
-        let database = try context.resolve(MockDatabaseResource.self)
-        return MockHTTPServerService(logger: logger, database: database)
-    }
-    
+/// A minimal no-op service that waits for graceful shutdown.
+private struct QuickService: Service, Sendable {
     func run() async throws {
-        logger.info("Mock HTTP Server starting...")
-        // Simulate work then exit gracefully
-        try await Task.sleep(for: .milliseconds(10))
-        logger.info("Mock HTTP Server completed")
+        try await gracefulShutdown()
     }
 }
 
-/// Example of an actor-based service that runs concurrently
-/// This demonstrates how services can use actors for their own isolation
-private actor MockActorService: ApplicationService {
-    static let dependencies: [any ApplicationService.Type] = []
-    
-    let logger: Logger
-    private var requestCount: Int = 0
-    
-    // Building still happens on MainActor, but execution is actor-isolated
-    @MainActor static func build(context: ApplicationContext) throws -> MockActorService {
-        let logger = try context.resolve(MockLoggerResource.self)
-        return MockActorService(logger: logger)
+// MARK: - Helpers
+
+private func makeRunner(
+    registry: ServiceRegistry,
+    identifier: String = "test-app"
+) -> ApplicationRunner {
+    ApplicationRunner(
+        identifier: identifier,
+        registry: registry,
+        config: ConfigReader(provider: EnvironmentVariablesProvider()),
+        environment: .testing,
+        logger: Logger(label: identifier)
+    )
+}
+
+// MARK: - ApplicationRunner Tests
+
+@Suite("ApplicationRunner")
+struct ApplicationRunnerTests {
+
+    // MARK: Task mode — execute closure runs and shuts down
+
+    @Test("Task mode: execute closure is called and group shuts down on completion")
+    func taskModeExecuteClosureRuns() async throws {
+        var registry = ServiceRegistry()
+        registry.register(
+            AKey.self,
+            entry: ConcreteServiceEntry<AKey>(label: "a", mode: .task) { _, _, _ in
+                (value: "a-value", service: QuickService())
+            }
+        )
+
+        let runner = makeRunner(registry: registry)
+
+        // nonisolated(unsafe) is safe here: the execute closure runs sequentially
+        // after all services are built, on a single task.
+        nonisolated(unsafe) var executedWithValue: String = ""
+        try await runner.run(
+            requiredServices: [AKey.self],
+            mode: .task,
+            execute: { services in
+                executedWithValue = services[AKey.self]
+            }
+        )
+        #expect(executedWithValue == "a-value")
     }
-    
-    init(logger: Logger) {
-        self.logger = logger
+
+    @Test("Task mode with no required services: execute closure still runs")
+    func taskModeNoRequiredServices() async throws {
+        let registry = ServiceRegistry()
+        let runner = makeRunner(registry: registry)
+
+        nonisolated(unsafe) var didExecute = false
+        try await runner.run(
+            requiredServices: [],
+            mode: .task,
+            execute: { _ in
+                didExecute = true
+            }
+        )
+        #expect(didExecute == true)
     }
-    
-    // This runs with actor isolation - safe concurrent access to requestCount
-    func run() async throws {
-        logger.info("Actor service starting...")
-        
-        // Simulate concurrent requests
-        await withTaskGroup(of: Void.self) { group in
-            for i in 1...5 {
-                group.addTask {
-                    await self.handleRequest(i)
-                }
+
+    @Test("Task mode: service value is available in execute closure")
+    func taskModeServiceValueAvailable() async throws {
+        var registry = ServiceRegistry()
+        registry.register(
+            BKey.self,
+            entry: ConcreteServiceEntry<BKey>(label: "b", mode: .task) { _, _, _ in
+                (value: "built-b", service: QuickService())
+            }
+        )
+
+        let runner = makeRunner(registry: registry)
+        nonisolated(unsafe) var gotValue: String = ""
+
+        try await runner.run(
+            requiredServices: [BKey.self],
+            mode: .task,
+            execute: { services in
+                gotValue = services[BKey.self]
+            }
+        )
+        #expect(gotValue == "built-b")
+    }
+
+    // MARK: Dependency resolution
+
+    @Test("Dependency resolution: B is built before A when A depends on B")
+    func dependencyResolutionOrder() async throws {
+        // Build order tracking: the build closures are called synchronously and
+        // sequentially by the runner, so this nonisolated(unsafe) access is safe.
+        nonisolated(unsafe) var buildOrder: [String] = []
+
+        var registry = ServiceRegistry()
+        // B has no dependencies
+        registry.register(
+            BKey.self,
+            entry: ConcreteServiceEntry<BKey>(label: "b", mode: .task) { _, _, _ in
+                buildOrder.append("b")
+                return (value: "b-value", service: QuickService())
+            }
+        )
+        // A depends on B
+        registry.register(
+            AKey.self,
+            entry: ConcreteServiceEntry<AKey>(
+                label: "a",
+                mode: .task,
+                dependencies: [BKey.self]
+            ) { _, _, _ in
+                buildOrder.append("a")
+                return (value: "a-value", service: QuickService())
+            }
+        )
+
+        let runner = makeRunner(registry: registry)
+        try await runner.run(requiredServices: [AKey.self], mode: .task, execute: { _ in })
+        // B must appear before A in the build order
+        let bIndex = try #require(buildOrder.firstIndex(of: "b"))
+        let aIndex = try #require(buildOrder.firstIndex(of: "a"))
+        #expect(bIndex < aIndex)
+    }
+
+    @Test("Shared dependency is built only once")
+    func sharedDependencyBuiltOnce() async throws {
+        nonisolated(unsafe) var buildCount = 0
+
+        var registry = ServiceRegistry()
+        // C is a shared dependency of both A and B
+        registry.register(
+            CKey.self,
+            entry: ConcreteServiceEntry<CKey>(label: "c", mode: .task) { _, _, _ in
+                buildCount += 1
+                return (value: "c-value", service: QuickService())
+            }
+        )
+        registry.register(
+            AKey.self,
+            entry: ConcreteServiceEntry<AKey>(
+                label: "a",
+                mode: .task,
+                dependencies: [CKey.self]
+            ) { _, _, _ in
+                return (value: "a-value", service: QuickService())
+            }
+        )
+        registry.register(
+            BKey.self,
+            entry: ConcreteServiceEntry<BKey>(
+                label: "b",
+                mode: .task,
+                dependencies: [CKey.self]
+            ) { _, _, _ in
+                return (value: "b-value", service: QuickService())
+            }
+        )
+
+        let runner = makeRunner(registry: registry)
+        try await runner.run(
+            requiredServices: [AKey.self, BKey.self],
+            mode: .task,
+            execute: { _ in }
+        )
+        #expect(buildCount == 1)
+    }
+
+    // MARK: Error cases
+
+    @Test("Missing service throws ApplicationError.missingService")
+    func missingServiceThrows() async throws {
+        // Register nothing for AKey but require it
+        let registry = ServiceRegistry()
+        let runner = makeRunner(registry: registry)
+
+        await #expect(throws: ApplicationError.self) {
+            try await runner.run(requiredServices: [AKey.self], mode: .task, execute: nil)
+        }
+    }
+
+    @Test("Missing service error has missingService case")
+    func missingServiceErrorCase() async throws {
+        let registry = ServiceRegistry()
+        let runner = makeRunner(registry: registry)
+
+        do {
+            try await runner.run(requiredServices: [AKey.self], mode: .task, execute: nil)
+            Issue.record("Expected ApplicationError.missingService to be thrown")
+        } catch let error as ApplicationError {
+            if case .missingService = error {
+                // Expected
+            } else {
+                Issue.record("Expected .missingService but got: \(error)")
             }
         }
-        
-        logger.info("Actor service completed with \(requestCount) requests")
     }
-    
-    private func handleRequest(_ id: Int) async {
-        requestCount += 1 // Safe because we're actor-isolated
-        try? await Task.sleep(for: .milliseconds(1))
-    }
-}
 
-/// A mock migration job that runs once and exits
-private struct MockMigrationJob: ApplicationJob {
-    static let dependencies: [any ApplicationService.Type] = []
-    
-    let database: MockDatabase
-    let logger: Logger
-    var ranMigrations = false
-    
-    @MainActor static func build(context: ApplicationContext) throws -> MockMigrationJob {
-        let database = try context.resolve(MockDatabaseResource.self)
-        let logger = try context.resolve(MockLoggerResource.self)
-        return MockMigrationJob(database: database, logger: logger)
-    }
-    
-    func run() async throws {
-        logger.info("Running database migrations on \(database.host):\(database.port)")
-        // Simulate migration work
-        try await Task.sleep(for: .milliseconds(10))
-        logger.info("Migrations complete")
-    }
-}
+    @Test("Cyclic dependency throws ApplicationError.cyclicDependency")
+    func cyclicDependencyThrows() async throws {
+        var registry = ServiceRegistry()
+        // A depends on B, B depends on A — a cycle
+        registry.register(
+            AKey.self,
+            entry: ConcreteServiceEntry<AKey>(
+                label: "a",
+                mode: .persistent,
+                dependencies: [BKey.self]
+            ) { _, _, _ in
+                (value: "a", service: QuickService())
+            }
+        )
+        registry.register(
+            BKey.self,
+            entry: ConcreteServiceEntry<BKey>(
+                label: "b",
+                mode: .persistent,
+                dependencies: [AKey.self]
+            ) { _, _, _ in
+                (value: "b", service: QuickService())
+            }
+        )
 
-/// A mock background worker that depends on the HTTP server
-private struct MockBackgroundWorkerService: ApplicationService {
-    // Type-safe dependencies - the compiler will catch typos!
-    static let dependencies: [any ApplicationService.Type] = [MockHTTPServerService.self]
-    
-    let logger: Logger
-    
-    @MainActor static func build(context: ApplicationContext) throws -> MockBackgroundWorkerService {
-        let logger = try context.resolve(MockLoggerResource.self)
-        return MockBackgroundWorkerService(logger: logger)
-    }
-    
-    func run() async throws {
-        logger.info("Background worker starting...")
-        // Simulate work then exit
-        try await Task.sleep(for: .milliseconds(10))
-        logger.info("Background worker completed")
-    }
-}
-
-// MARK: - Test Suite
-
-@MainActor
-@Suite("ApplicationRunner Usage Patterns")
-struct ApplicationRunnerTests {
-    
-    // Helper to create a test config reader
-    private func createTestConfig() -> ConfigReader {
-        ConfigReader(providers: [
-            InMemoryProvider(values: [
-                "database.host": "test-host",
-                "database.port": 5433
-            ])
-        ])
-    }
-    
-    @Test("Bootstrap with resources and services")
-    func testSimpleBootstrap() async throws {
-        let config = createTestConfig()
-        
-        // Bootstrap with all resources and services - DRY!
-        let runner = ApplicationRunner.bootstrap(
-            identifier: "test-app",
-            config: config,
-            resources: [
-                MockDatabaseResource.self,
-                MockLoggerResource.self
-            ],
-            services: [
-                MockHTTPServerService.self,
-                MockBackgroundWorkerService.self
-            ]
-        )
-        
-        // Verify the runner was created with the correct context
-        #expect(runner.context.identifier == "test-app")
-        
-        // Verify resources can be resolved
-        let database = try runner.context.resolve(MockDatabaseResource.self)
-        #expect(database.host == "test-host")
-        #expect(database.port == 5433)
-        
-        let logger = try runner.context.resolve(MockLoggerResource.self)
-        #expect(logger.label == "test-app")
-    }
-    
-    @Test("Job terminates after completion")
-    func testMigrationJob() async throws {
-        let config = createTestConfig()
-        
-        let runner = ApplicationRunner.bootstrap(
-            identifier: "migration-runner",
-            config: config,
-            resources: [
-                MockDatabaseResource.self,
-                MockLoggerResource.self
-            ],
-            services: [
-                MockMigrationJob.self
-            ]
-        )
-        
-        // Verify the migration job is configured correctly
-        let database = try runner.context.resolve(MockDatabaseResource.self)
-        #expect(database.host == "test-host")
-        
-        // Note: Actually running the job would require Task cancellation handling
-        // for the test suite, so we just verify the setup
-    }
-    
-    @Test("Mixed registration pattern")
-    func testMixedBootstrap() async throws {
-        let config = createTestConfig()
-        
-        // You can use the builder directly for custom cases
-        var builder = ApplicationRegistryBuilder()
-        
-        // Register resources via protocol
-        builder.register(MockDatabaseResource.self)
-        builder.register(MockLoggerResource.self)
-        
-        // Register services via protocol
-        builder.register(MockHTTPServerService.self)
-        builder.register(MockBackgroundWorkerService.self)
-        
-        let registry = builder.build()
-        let context = ApplicationContext(identifier: "mixed-app", config: config, registry: registry)
-        let runner = ApplicationRunner(context: context)
-        
-        #expect(runner.context.identifier == "mixed-app")
-        
-        // Verify resources are available
-        let database = try runner.context.resolve(MockDatabaseResource.self)
-        #expect(database.host == "test-host")
-    }
-    
-    @Test("Dependency resolution order")
-    func testDependencyResolution() async throws {
-        let config = createTestConfig()
-        
-        let runner = ApplicationRunner.bootstrap(
-            identifier: "dep-test",
-            config: config,
-            resources: [
-                MockLoggerResource.self,
-                MockDatabaseResource.self
-            ],
-            services: [
-                MockHTTPServerService.self,
-                MockBackgroundWorkerService.self // Depends on HTTPServer
-            ]
-        )
-        
-        #expect(runner.context.identifier == "dep-test")
-        
-        // The ApplicationRunner should handle the dependency ordering
-        // when services are run (HTTPServer before BackgroundWorker)
-    }
-    
-    @Test("Resource caching")
-    func testResourceCaching() async throws {
-        let config = createTestConfig()
-        
-        let runner = ApplicationRunner.bootstrap(
-            identifier: "cache-test",
-            config: config,
-            resources: [
-                MockDatabaseResource.self,
-                MockLoggerResource.self
-            ],
-            services: []
-        )
-        
-        // Resolve the same resource twice
-        let database1 = try runner.context.resolve(MockDatabaseResource.self)
-        let database2 = try runner.context.resolve(MockDatabaseResource.self)
-        
-        // Should be the same instance (cached)
-        #expect(database1.host == database2.host)
-        #expect(database1.port == database2.port)
-    }
-    
-    @Test("Multiple services with shared resources")
-    func testSharedResources() async throws {
-        let config = createTestConfig()
-        
-        let runner = ApplicationRunner.bootstrap(
-            identifier: "shared-test",
-            config: config,
-            resources: [
-                MockDatabaseResource.self,
-                MockLoggerResource.self
-            ],
-            services: [
-                MockHTTPServerService.self,
-                MockMigrationJob.self
-            ]
-        )
-        
-        // Both services should be able to resolve the same resources
-        let logger = try runner.context.resolve(MockLoggerResource.self)
-        let database = try runner.context.resolve(MockDatabaseResource.self)
-        
-        #expect(logger.label == "shared-test")
-        #expect(database.host == "test-host")
-    }
-    
-    @Test("ApplicationJob has termination behavior configured")
-    func testJobTerminationBehavior() async throws {
-        // Verify that ApplicationJob protocol provides a termination behavior
-        // We can't compare TerminationBehavior directly as it doesn't conform to Equatable,
-        // but we can verify it's non-nil for jobs
-        #expect(MockMigrationJob.successTerminationBehavior != nil)
-        #expect(MockMigrationJob.failureTerminationBehavior == nil)
-    }
-    
-    @Test("ApplicationService has correct default termination behavior")
-    func testServiceTerminationBehavior() async throws {
-        // Verify that ApplicationService protocol provides the correct defaults
-        // Regular services should have no termination behavior by default
-        #expect(MockHTTPServerService.successTerminationBehavior == nil)
-        #expect(MockHTTPServerService.failureTerminationBehavior == nil)
-    }
-}
-
-// MARK: - Error Handling Tests
-
-@MainActor
-@Suite("ApplicationRunner Error Handling")
-struct ApplicationRunnerErrorTests {
-    
-    @Test("Missing resource throws error")
-    func testMissingResourceError() async throws {
-        let config = ConfigReader(providers: [InMemoryProvider(values: [:])])
-        
-        // Create a runner without registering the database resource
-        let runner = ApplicationRunner.bootstrap(
-            identifier: "error-test",
-            config: config,
-            resources: [
-                MockLoggerResource.self
-                // MockDatabaseResource is NOT registered
-            ],
-            services: []
-        )
-        
-        // Attempting to resolve the missing resource should throw
-        #expect(throws: ApplicationRunner.Error.self) {
-            _ = try runner.context.resolve(MockDatabaseResource.self)
+        let runner = makeRunner(registry: registry)
+        do {
+            try await runner.run(requiredServices: [AKey.self], mode: .task, execute: nil)
+            Issue.record("Expected ApplicationError.cyclicDependency to be thrown")
+        } catch let error as ApplicationError {
+            if case .cyclicDependency = error {
+                // Expected
+            } else {
+                Issue.record("Expected .cyclicDependency but got: \(error)")
+            }
         }
     }
-    
-    @Test("Error description includes resource name")
-    func testErrorDescription() async throws {
-        let error = ApplicationRunner.Error.missingResource("TestResource")
-        #expect(error.description.contains("TestResource"))
-        
-        let serviceError = ApplicationRunner.Error.missingService("TestService")
-        #expect(serviceError.description.contains("TestService"))
-        
-        let cyclicError = ApplicationRunner.Error.cyclicDependency(["A", "B", "A"])
-        #expect(cyclicError.description.contains("A -> B -> A"))
-        
-        let typeMismatchError = ApplicationRunner.Error.resourceTypeMismatch("WrongType")
-        #expect(typeMismatchError.description.contains("WrongType"))
+
+    @Test("Persistent service depending on task service throws ApplicationError.persistentDependsOnTask")
+    func persistentDependsOnTaskThrows() async throws {
+        var registry = ServiceRegistry()
+        // B is task-scoped
+        registry.register(
+            BKey.self,
+            entry: ConcreteServiceEntry<BKey>(label: "b", mode: .task) { _, _, _ in
+                (value: "b", service: QuickService())
+            }
+        )
+        // A is persistent but depends on task-scoped B
+        registry.register(
+            AKey.self,
+            entry: ConcreteServiceEntry<AKey>(
+                label: "a",
+                mode: .persistent,
+                dependencies: [BKey.self]
+            ) { _, _, _ in
+                (value: "a", service: QuickService())
+            }
+        )
+
+        let runner = makeRunner(registry: registry)
+        do {
+            try await runner.run(requiredServices: [AKey.self], mode: .task, execute: nil)
+            Issue.record("Expected ApplicationError.persistentDependsOnTask to be thrown")
+        } catch let error as ApplicationError {
+            if case .persistentDependsOnTask(let persistent, let task) = error {
+                #expect(persistent == "a")
+                #expect(task == "b")
+            } else {
+                Issue.record("Expected .persistentDependsOnTask but got: \(error)")
+            }
+        }
+    }
+
+    // MARK: ApplicationError description
+
+    @Test("ApplicationError descriptions contain relevant names")
+    func applicationErrorDescriptions() {
+        let missing = ApplicationError.missingService(key: "MyKey")
+        #expect(missing.description.contains("MyKey"))
+
+        let cyclic = ApplicationError.cyclicDependency(path: ["a", "b", "a"])
+        #expect(cyclic.description.contains("a"))
+        #expect(cyclic.description.contains("b"))
+
+        let persOnTask = ApplicationError.persistentDependsOnTask(
+            persistent: "persistentSvc",
+            task: "taskSvc"
+        )
+        #expect(persOnTask.description.contains("persistentSvc"))
+        #expect(persOnTask.description.contains("taskSvc"))
+
+        let missingConfig = ApplicationError.missingConfiguration(
+            key: "db.host",
+            service: "postgres"
+        )
+        #expect(missingConfig.description.contains("db.host"))
+        #expect(missingConfig.description.contains("postgres"))
     }
 }
 
-// MARK: - Documentation Examples
+// MARK: - Integration Tests
 
-extension ApplicationRunnerTests {
-    /// Example showing the recommended pattern for a typical application
-    @Test("Documentation: Typical application setup", .disabled("Documentation example"))
-    func exampleTypicalApplication() async throws {
-        let config = createTestConfig()
-        
-        // This is the recommended way to set up an application
-        let runner = ApplicationRunner.bootstrap(
-            identifier: "my-app",
-            config: config,
-            resources: [
-                MockDatabaseResource.self,
-                MockLoggerResource.self
-            ],
-            services: [
-                MockHTTPServerService.self,
-                MockBackgroundWorkerService.self
-            ]
+@Suite("ApplicationRunner Integration")
+struct ApplicationRunnerIntegrationTests {
+
+    /// Full flow: define ServiceKeys, build entries, register them, run with a task execute closure.
+    @Test("Full integration: keys → entries → registry → runner → task execute")
+    func fullIntegrationFlow() async throws {
+        struct GreeterKey: ServiceKey {
+            static var defaultValue: String { "" }
+        }
+
+        var registry = ServiceRegistry()
+        registry.register(
+            GreeterKey.self,
+            entry: ConcreteServiceEntry<GreeterKey>(
+                label: "greeter",
+                mode: .task
+            ) { _, _, _ in
+                (value: "Hello, World!", service: QuickService())
+            }
         )
-        
-        // Run specific services - no string keys needed!
-        // Note: Commented out as it would block the test
-        // try await runner.run([
-        //     MockHTTPServerService.self,
-        //     MockBackgroundWorkerService.self
-        // ])
-        
-        #expect(runner.context.identifier == "my-app")
+
+        let runner = ApplicationRunner(
+            identifier: "integration-app",
+            registry: registry,
+            config: ConfigReader(provider: EnvironmentVariablesProvider()),
+            environment: .testing,
+            logger: Logger(label: "integration-app")
+        )
+
+        nonisolated(unsafe) var result: String = ""
+        try await runner.run(
+            requiredServices: [GreeterKey.self],
+            mode: .task,
+            execute: { services in
+                result = services[GreeterKey.self]
+            }
+        )
+        #expect(result == "Hello, World!")
     }
-    
-    /// Example showing how to run a one-off job
-    @Test("Documentation: Running a migration job", .disabled("Documentation example"))
-    func exampleMigrationJob() async throws {
-        let config = createTestConfig()
-        
-        let runner = ApplicationRunner.bootstrap(
-            identifier: "migration-runner",
-            config: config,
-            resources: [
-                MockDatabaseResource.self,
-                MockLoggerResource.self
-            ],
-            services: [
-                MockMigrationJob.self
-            ]
+
+    /// HydrogenApplication conformance wires up correctly.
+    @Test("HydrogenApplication conformance: configure populates registry")
+    func hydrogenApplicationConformance() {
+        struct CountKey: ServiceKey {
+            static var defaultValue: Int { -1 }
+        }
+
+        struct TestApp: HydrogenApplication {
+            static let identifier = "test-app"
+            static var commands: [any AsyncParsableCommand.Type] { [] }
+
+            static func configure(_ services: inout ServiceRegistry) {
+                services.register(
+                    CountKey.self,
+                    entry: ConcreteServiceEntry<CountKey>(label: "counter", mode: .persistent) { _, _, _ in
+                        (value: 42, service: QuickService())
+                    }
+                )
+            }
+        }
+
+        var registry = ServiceRegistry()
+        TestApp.configure(&registry)
+
+        #expect(registry.entries.count == 1)
+        #expect(registry.entries.first?.entry.label == "counter")
+    }
+
+    /// A chain of three services: X ← Y ← Z. All three are built in correct order.
+    @Test("Three-level dependency chain resolves in correct order")
+    func threeLevelDependencyChain() async throws {
+        struct X: ServiceKey { static var defaultValue: Int { 0 } }
+        struct Y: ServiceKey { static var defaultValue: Int { 0 } }
+        struct Z: ServiceKey { static var defaultValue: Int { 0 } }
+
+        nonisolated(unsafe) var buildOrder: [String] = []
+
+        var registry = ServiceRegistry()
+        registry.register(
+            X.self,
+            entry: ConcreteServiceEntry<X>(label: "x", mode: .task) { _, _, _ in
+                buildOrder.append("x")
+                return (value: 1, service: QuickService())
+            }
         )
-        
-        // This will run the migration and then gracefully shutdown
-        // because MockMigrationJob is an ApplicationJob
-        // Note: Commented out as it would block the test
-        // try await runner.run([MockMigrationJob.self])
-        
-        #expect(runner.context.identifier == "migration-runner")
+        registry.register(
+            Y.self,
+            entry: ConcreteServiceEntry<Y>(
+                label: "y",
+                mode: .task,
+                dependencies: [X.self]
+            ) { _, _, _ in
+                buildOrder.append("y")
+                return (value: 2, service: QuickService())
+            }
+        )
+        registry.register(
+            Z.self,
+            entry: ConcreteServiceEntry<Z>(
+                label: "z",
+                mode: .task,
+                dependencies: [Y.self]
+            ) { _, _, _ in
+                buildOrder.append("z")
+                return (value: 3, service: QuickService())
+            }
+        )
+
+        let runner = makeRunner(registry: registry)
+        try await runner.run(requiredServices: [Z.self], mode: .task, execute: { _ in })
+
+        let xIdx = try #require(buildOrder.firstIndex(of: "x"))
+        let yIdx = try #require(buildOrder.firstIndex(of: "y"))
+        let zIdx = try #require(buildOrder.firstIndex(of: "z"))
+        #expect(xIdx < yIdx)
+        #expect(yIdx < zIdx)
+    }
+
+    /// Values produced by dependencies are visible to downstream services.
+    @Test("Downstream service can read value set by upstream service")
+    func downstreamReadsUpstreamValue() async throws {
+        struct UpKey: ServiceKey { static var defaultValue: Int { 0 } }
+        struct DownKey: ServiceKey { static var defaultValue: String { "" } }
+
+        var registry = ServiceRegistry()
+        registry.register(
+            UpKey.self,
+            entry: ConcreteServiceEntry<UpKey>(label: "upstream", mode: .task) { _, _, _ in
+                (value: 100, service: QuickService())
+            }
+        )
+        registry.register(
+            DownKey.self,
+            entry: ConcreteServiceEntry<DownKey>(
+                label: "downstream",
+                mode: .task,
+                dependencies: [UpKey.self]
+            ) { values, _, _ in
+                let upValue = values[UpKey.self]
+                return (value: "saw \(upValue)", service: QuickService())
+            }
+        )
+
+        let runner = makeRunner(registry: registry)
+        nonisolated(unsafe) var result = ""
+        try await runner.run(
+            requiredServices: [DownKey.self],
+            mode: .task,
+            execute: { services in
+                result = services[DownKey.self]
+            }
+        )
+        #expect(result == "saw 100")
     }
 }
