@@ -4,6 +4,7 @@
 //
 
 import ArgumentParser
+import Configuration
 
 /// The main entry point protocol for a Hydrogen application.
 ///
@@ -62,6 +63,26 @@ public protocol HydrogenApplication: Sendable {
     /// - Parameter services: The registry to populate.
     static func configure(_ services: inout ServiceRegistry)
 
+    /// Builds the ``ConfigReader`` used by all commands in this application.
+    ///
+    /// Override this method to customise the configuration stack — for example, to
+    /// load values from a `.env` file or inject in-memory defaults:
+    ///
+    /// ```swift
+    /// static func configReader(for environment: Environment) async throws -> ConfigReader {
+    ///     await ConfigReader(providers: [
+    ///         try EnvironmentVariablesProvider(environmentFilePath: ".env", allowMissing: true),
+    ///         InMemoryProvider(values: ["postgres.database": .init(.string("myapp_\(environment.name)"), isSecret: false)]),
+    ///     ])
+    /// }
+    /// ```
+    ///
+    /// The default implementation reads only from process environment variables.
+    ///
+    /// - Parameter environment: The resolved runtime environment (e.g. `.development`, `.production`).
+    /// - Returns: A configured ``ConfigReader`` for the application.
+    static func configReader(for environment: Environment) async throws -> ConfigReader
+
     /// The root CLI command for this application.
     ///
     /// This type is the ArgumentParser entry point. For a single-command app,
@@ -76,5 +97,10 @@ extension HydrogenApplication {
     /// Delegates directly to `RootCommand.main()`.
     public static func main() async {
         await RootCommand.main()
+    }
+
+    /// Default implementation — reads from process environment variables only.
+    public static func configReader(for environment: Environment) async throws -> ConfigReader {
+        ConfigReader(provider: EnvironmentVariablesProvider())
     }
 }

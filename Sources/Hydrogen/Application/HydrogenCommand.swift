@@ -86,14 +86,14 @@ extension HydrogenCommand {
     /// This implementation:
     /// 1. Reads the active ``Environment`` from the current ``ServiceContext``,
     ///    falling back to `.development` if not set.
-    /// 2. Constructs a ``ConfigReader`` backed by ``EnvironmentVariablesProvider``.
+    /// 2. Calls `App.configReader(for:)` to build the ``ConfigReader``.
     /// 3. Calls `App.configure(_:)` to populate a ``ServiceRegistry``.
     /// 4. Creates an ``ApplicationRunner`` and invokes ``ApplicationRunner/run(requiredServices:mode:execute:)``.
     ///
     /// The lifecycle mode is determined by `lifecycleMode`, which ``TaskCommand`` sets to `.task`.
     public func run() async throws {
         let environment = ServiceContext.active.environment ?? .development
-        let config = ConfigReader(provider: EnvironmentVariablesProvider())
+        let config = try await App.configReader(for: environment)
         var registry = ServiceRegistry()
         App.configure(&registry)
 
