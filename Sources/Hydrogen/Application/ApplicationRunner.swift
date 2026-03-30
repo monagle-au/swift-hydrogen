@@ -78,8 +78,8 @@ struct ApplicationRunner: Sendable {
         var serviceConfigs: [ServiceGroupConfiguration.ServiceConfiguration] = []
 
         for item in sorted {
-            let service = try withBuildSpan(label: item.entry.label) {
-                try item.entry.buildAndStore(from: &values, config: config, logger: logger)
+            let service = try await withBuildSpan(label: item.entry.label) {
+                try await item.entry.buildAndStore(from: &values, config: config, logger: logger)
             }
 
             var cfg = ServiceGroupConfiguration.ServiceConfiguration(service: service)

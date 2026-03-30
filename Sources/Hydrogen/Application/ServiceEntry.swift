@@ -62,7 +62,7 @@ public protocol ServiceEntry: Sendable {
     /// - Returns: The built `Service` instance.
     /// - Throws: Any error from the underlying build closure, including
     ///   ``ApplicationError/missingConfiguration(key:service:)``.
-    func buildAndStore(from values: inout ServiceValues, config: ConfigReader, logger: Logger) throws -> any Service
+    func buildAndStore(from values: inout ServiceValues, config: ConfigReader, logger: Logger) async throws -> any Service
 }
 
 // MARK: - ConcreteServiceEntry
@@ -100,7 +100,7 @@ public struct ConcreteServiceEntry<K: ServiceKey>: ServiceEntry {
     /// Dependencies expressed as `ObjectIdentifier` values derived from key types.
     public let dependencies: [ObjectIdentifier]
 
-    private let buildClosure: @Sendable (ServiceValues, ConfigReader, Logger) throws -> (value: K.Value, service: any Service & Sendable)
+    private let buildClosure: @Sendable (ServiceValues, ConfigReader, Logger) async throws -> (value: K.Value, service: any Service & Sendable)
 
     /// Creates a new entry with an explicit build closure.
     ///
@@ -113,7 +113,7 @@ public struct ConcreteServiceEntry<K: ServiceKey>: ServiceEntry {
         label: String,
         mode: ServiceLifecycleMode,
         dependencies: [any ServiceKey.Type] = [],
-        build: @escaping @Sendable (ServiceValues, ConfigReader, Logger) throws -> (value: K.Value, service: any Service & Sendable)
+        build: @escaping @Sendable (ServiceValues, ConfigReader, Logger) async throws -> (value: K.Value, service: any Service & Sendable)
     ) {
         self.label = label
         self.mode = mode
@@ -122,8 +122,8 @@ public struct ConcreteServiceEntry<K: ServiceKey>: ServiceEntry {
     }
 
     /// Builds the service, stores `K.Value` in `values`, and returns the `Service`.
-    public func buildAndStore(from values: inout ServiceValues, config: ConfigReader, logger: Logger) throws -> any Service {
-        let result = try buildClosure(values, config, logger)
+    public func buildAndStore(from values: inout ServiceValues, config: ConfigReader, logger: Logger) async throws -> any Service {
+        let result = try await buildClosure(values, config, logger)
         values[K.self] = result.value
         return result.service
     }
@@ -153,10 +153,10 @@ extension ConcreteServiceEntry where K.Value: Service & Sendable {
         label: String,
         mode: ServiceLifecycleMode,
         dependencies: [any ServiceKey.Type] = [],
-        build: @escaping @Sendable (ServiceValues, ConfigReader, Logger) throws -> K.Value
+        build: @escaping @Sendable (ServiceValues, ConfigReader, Logger) async throws -> K.Value
     ) {
         self.init(label: label, mode: mode, dependencies: dependencies) { values, config, logger in
-            let value = try build(values, config, logger)
+            let value = try await build(values, config, logger)
             return (value: value, service: value)
         }
     }

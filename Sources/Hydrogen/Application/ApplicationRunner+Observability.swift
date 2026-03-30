@@ -17,8 +17,8 @@ extension ApplicationRunner {
     ///   - body: The synchronous build closure.
     /// - Returns: The value returned by `body`.
     /// - Throws: Any error thrown by `body`.
-    func withBuildSpan<T>(label: String, body: () throws -> T) throws -> T {
-        let value = try body()
+    func withBuildSpan<T>(label: String, body: () async throws -> T) async throws -> T {
+        let value = try await body()
         Counter(label: "hydrogen.service.builds", dimensions: [("service", label)]).increment()
         return value
     }
