@@ -6,6 +6,7 @@
 import ArgumentParser
 import Configuration
 import Logging
+import ServiceContextModule
 
 // MARK: - UncheckedSendableBox
 
