@@ -227,7 +227,7 @@ struct ConcreteServiceEntryTests {
     }
 
     @Test("buildAndStore stores the value in ServiceValues and returns a Service")
-    func buildAndStoreExplicitTuple() throws {
+    func buildAndStoreExplicitTuple() async throws {
         let entry = ConcreteServiceEntry<IntKey>(
             label: "store-test",
             mode: .persistent
@@ -236,12 +236,12 @@ struct ConcreteServiceEntryTests {
         }
         var values = ServiceValues()
         let config = makeConfig()
-        _ = try entry.buildAndStore(from: &values, config: config, logger: testLogger)
+        _ = try await entry.buildAndStore(from: &values, config: config, logger: testLogger)
         #expect(values[IntKey.self] == 123)
     }
 
     @Test("Convenience init (K.Value: Service & Sendable) builds correctly")
-    func convenienceInitBuildsCorrectly() throws {
+    func convenienceInitBuildsCorrectly() async throws {
         // SelfServiceKey.Value is SelfService (non-optional, Service & Sendable),
         // so the convenience init is selected — the returned value IS the service.
         let entry = ConcreteServiceEntry<SelfServiceKey>(
@@ -252,12 +252,12 @@ struct ConcreteServiceEntryTests {
         }
         var values = ServiceValues()
         let config = makeConfig()
-        _ = try entry.buildAndStore(from: &values, config: config, logger: testLogger)
+        _ = try await entry.buildAndStore(from: &values, config: config, logger: testLogger)
         #expect(values[SelfServiceKey.self].id == "abc")
     }
 
     @Test("Build closure receives the current ServiceValues snapshot")
-    func buildClosureReceivesCurrentValues() throws {
+    func buildClosureReceivesCurrentValues() async throws {
         // Pre-populate values with a dependency value.
         var values = ServiceValues()
         values[IntKey.self] = 77
@@ -273,7 +273,7 @@ struct ConcreteServiceEntryTests {
         }
 
         let config = makeConfig()
-        _ = try entry.buildAndStore(from: &values, config: config, logger: testLogger)
+        _ = try await entry.buildAndStore(from: &values, config: config, logger: testLogger)
         #expect(values[StringKey.self] == "saw-77")
     }
 }
