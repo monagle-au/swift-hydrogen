@@ -39,11 +39,14 @@ public enum HydrogenLogging {
 
     // MARK: - Stock predicates
 
-    /// True when the process appears to be running on Cloud Run or a
-    /// Cloud Run Job. Both runtimes set the `K_SERVICE` env var to the
-    /// service / job name.
+    /// True when the process appears to be running on Cloud Run (a
+    /// service revision) or a Cloud Run Job. Services set `K_SERVICE`;
+    /// Jobs set `CLOUD_RUN_JOB` instead. Either is sufficient evidence
+    /// that we're inside the Cloud Run runtime and Cloud Logging will
+    /// ingest stdout.
     public static let isCloudRun: EnvironmentSelector.Predicate = {
-        ProcessInfo.processInfo.environment["K_SERVICE"] != nil
+        let env = ProcessInfo.processInfo.environment
+        return env["K_SERVICE"] != nil || env["CLOUD_RUN_JOB"] != nil
     }
 
     // MARK: - Default selector
