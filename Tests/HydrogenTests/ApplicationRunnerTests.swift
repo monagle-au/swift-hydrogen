@@ -5,10 +5,11 @@
 //  Tests for ApplicationRunner: dependency resolution, lifecycle modes, and error cases.
 //
 
-import Testing
-import ServiceLifecycle
-import Logging
+import ArgumentParser
 import Configuration
+import Logging
+import ServiceLifecycle
+import Testing
 @testable import Hydrogen
 
 // MARK: - Service Keys
