@@ -9,7 +9,7 @@ swift build
 swift test
 ```
 
-Requires Swift 6.1+, macOS 15+.
+Requires Swift 6.2+, macOS 15+.
 
 ## Architecture
 
