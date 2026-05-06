@@ -45,12 +45,54 @@ public struct AnyService: Service, Sendable {
 ///     return (value: store, service: AnchorService())
 /// }
 /// ```
+///
+/// The `init(onShutdown:)` overload lets the entry attach an async cleanup
+/// hook for resources it actually owns (e.g. an `HTTPClient` whose
+/// `shutdown()` releases NIO event-loop threads). The hook runs after the
+/// surrounding task is cancelled and before the cancellation re-raises:
+///
+/// ```swift
+/// ConcreteServiceEntry<MyClientServiceKey>(...) { _, _, _ in
+///     let httpClient = HTTPClient(eventLoopGroupProvider: .singleton)
+///     let client = MyClient(httpClient: httpClient)
+///     return (value: client, service: AnchorService {
+///         try? await httpClient.shutdown()
+///     })
+/// }
+/// ```
 public struct AnchorService: Service, Sendable {
-    public init() {}
+
+    private let onShutdown: (@Sendable () async -> Void)?
+
+    /// Pure-anchor variant — sleeps until cancelled, no cleanup.
+    public init() {
+        self.onShutdown = nil
+    }
+
+    /// Cleanup variant — sleeps until cancelled, then runs `onShutdown`
+    /// before re-raising the cancellation. Use when the service owns a
+    /// resource that needs async teardown (HTTP client connection pool,
+    /// long-lived gRPC channel, etc.).
+    ///
+    /// `onShutdown` is `async` (not `throws`) — wrap any throwing
+    /// teardown call in `try?` because there's nothing the lifecycle
+    /// library can do with a thrown error during shutdown.
+    public init(onShutdown: @escaping @Sendable () async -> Void) {
+        self.onShutdown = onShutdown
+    }
 
     public func run() async throws {
-        // Sleep for a very long but safe duration (Int32.max seconds ≈ 68 years).
-        // Int.max overflows when converted to nanoseconds, so we use Int32.max.
-        try await Task.sleep(for: .seconds(Int32.max))
+        do {
+            // Sleep for a very long but safe duration (Int32.max seconds ≈ 68 years).
+            // Int.max overflows when converted to nanoseconds, so we use Int32.max.
+            try await Task.sleep(for: .seconds(Int32.max))
+        } catch {
+            // SIGTERM → ServiceGroup cancels → Task.sleep throws.
+            // Run the cleanup hook (if any) before re-raising so the
+            // lifecycle library still treats this as a graceful
+            // termination via CancellationError.
+            await onShutdown?()
+            throw error
+        }
     }
 }
