@@ -10,6 +10,21 @@ import NIOSSL
 import PostgresNIO
 
 extension PostgresClient.Configuration {
+    /// Build a `PostgresClient.Configuration` from a ``ConfigReader`` scope.
+    ///
+    /// Connection parameters (matching the existing keys):
+    /// - `username` (default `"postgres"`), `password` (secret), `database`
+    /// - Either `unixSocketPath`, OR `host` (default `"localhost"`) + `port` (default `5432`) + `tls.*`
+    ///
+    /// Pool + timeout knobs (all optional; absent keys preserve postgres-nio defaults):
+    /// - `pool.minimumConnections` (Int; default 0 — postgres-nio default)
+    /// - `pool.maximumConnections` (Int; default 20 — postgres-nio default)
+    /// - `pool.connectionIdleTimeoutSeconds` (Int; default 60 — postgres-nio default)
+    /// - `connectTimeoutSeconds` (Int; default 10 — postgres-nio default)
+    /// - `statementTimeoutSeconds` (Int; default unset — when set, sent as the
+    ///   `statement_timeout` startup parameter so every session inherits it.
+    ///   Use 0 to explicitly disable the GUC for callers that need long-
+    ///   running queries; omit the key entirely to inherit the server default.)
     public init(config: ConfigReader) {
         let username = config.string(forKey: "username", default: "postgres")
         let password = config.string(forKey: "password", isSecret: true)
@@ -27,6 +42,37 @@ extension PostgresClient.Configuration {
             self.init(
                 host: host, port: port, username: username, password: password, database: database,
                 tls: tls)
+        }
+
+        applyPoolAndTimeoutOverrides(from: config)
+    }
+
+    /// Apply optional pool + timeout config keys to `self.options`. Each key
+    /// is optional; absent keys leave the postgres-nio defaults intact.
+    ///
+    /// Public so apps that construct `PostgresClient.Configuration` directly
+    /// (e.g. for legacy reasons) can layer the same env-driven knobs on top.
+    public mutating func applyPoolAndTimeoutOverrides(from config: ConfigReader) {
+        let pool = config.scoped(to: "pool")
+        if let minConns: Int = pool.int(forKey: "minimumConnections") {
+            self.options.minimumConnections = minConns
+        }
+        if let maxConns: Int = pool.int(forKey: "maximumConnections") {
+            self.options.maximumConnections = maxConns
+        }
+        if let idleSeconds: Int = pool.int(forKey: "connectionIdleTimeoutSeconds") {
+            self.options.connectionIdleTimeout = .seconds(idleSeconds)
+        }
+        if let connectSeconds: Int = config.int(forKey: "connectTimeoutSeconds") {
+            self.options.connectTimeout = .seconds(connectSeconds)
+        }
+        // Statement timeout is per-session; postgres accepts it as a startup
+        // parameter, so every connection in the pool inherits it without
+        // needing a per-checkout SET. Value is milliseconds; "0" disables.
+        if let statementSeconds: Int = config.int(forKey: "statementTimeoutSeconds") {
+            self.options.additionalStartupParameters.append(
+                ("statement_timeout", "\(statementSeconds * 1000)")
+            )
         }
     }
 }

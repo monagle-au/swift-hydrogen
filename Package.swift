@@ -55,5 +55,12 @@ let package = Package(
             name: "HydrogenTests",
             dependencies: ["Hydrogen"]
         ),
+        .testTarget(
+            name: "HydrogenPostgresTests",
+            dependencies: [
+                "HydrogenPostgres",
+                .product(name: "Configuration", package: "swift-configuration"),
+            ]
+        ),
     ]
 )
