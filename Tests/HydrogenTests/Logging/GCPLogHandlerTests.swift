@@ -5,6 +5,7 @@
 
 import Foundation
 import Logging
+import ServiceContextModule
 import Synchronization
 import Testing
 @testable import Hydrogen
@@ -177,25 +178,120 @@ struct GCPLogHandlerTests {
         #expect(sink.snapshot.count == 2)
     }
 
-    @Test("init applies logLevel parameter")
-    func initLogLevelParameter() {
+    // MARK: - Trace correlation
+
+    @Test("emits Cloud Logging trace fields when ServiceContext carries trace + project ID set")
+    func tracingFieldsEmitted() async throws {
         let sink = CapturedSink()
-        let handler = GCPLogHandler(label: "test", logLevel: .warning, sink: sink.sink)
-        #expect(handler.logLevel == .warning)
+        var handler = GCPLogHandler(
+            label: "test",
+            gcpProjectID: "my-proj",
+            sink: sink.sink
+        )
+        handler.logLevel = .trace
         let logger = Logger(label: "test", factory: { _ in handler })
-        // Logger's logLevel is initialised from handler.logLevel — debug
-        // and info should be dropped, warning kept.
-        logger.debug("nope")
-        logger.info("nope")
-        logger.warning("yep")
-        #expect(sink.snapshot.count == 1)
+
+        var ctx = ServiceContext.topLevel
+        ctx.loggingTraceContext = LoggingTraceContext(
+            traceID: "0af7651916cd43dd8448eb211c80319c",
+            spanID: "b7ad6b7169203331",
+            sampled: true
+        )
+        await ServiceContext.withValue(ctx) {
+            logger.info("traced")
+        }
+
+        let json = try parse(sink.snapshot[0])
+        #expect(json["logging.googleapis.com/trace"] as? String == "projects/my-proj/traces/0af7651916cd43dd8448eb211c80319c")
+        #expect(json["logging.googleapis.com/spanId"] as? String == "b7ad6b7169203331")
+        #expect(json["logging.googleapis.com/trace_sampled"] as? String == "true")
     }
 
-    @Test("init defaults logLevel to .info when not specified")
-    func initLogLevelDefault() {
+    @Test("no trace fields when ServiceContext has no LoggingTraceContext")
+    func tracingFieldsAbsent() throws {
         let sink = CapturedSink()
-        let handler = GCPLogHandler(label: "test", sink: sink.sink)
-        #expect(handler.logLevel == .info)
+        let handler = GCPLogHandler(label: "test", gcpProjectID: "my-proj", sink: sink.sink)
+        let logger = Logger(label: "test", factory: { _ in handler })
+        logger.info("untraced")
+
+        let json = try parse(sink.snapshot[0])
+        #expect(json["logging.googleapis.com/trace"] == nil)
+        #expect(json["logging.googleapis.com/spanId"] == nil)
+        #expect(json["logging.googleapis.com/trace_sampled"] == nil)
+    }
+
+    @Test("no trace fields when project ID is unset")
+    func tracingFieldsRequireProjectID() async throws {
+        let sink = CapturedSink()
+        let handler = GCPLogHandler(label: "test", gcpProjectID: nil, sink: sink.sink)
+        let logger = Logger(label: "test", factory: { _ in handler })
+
+        var ctx = ServiceContext.topLevel
+        ctx.loggingTraceContext = LoggingTraceContext(
+            traceID: "0af7651916cd43dd8448eb211c80319c",
+            spanID: "b7ad6b7169203331"
+        )
+        await ServiceContext.withValue(ctx) {
+            logger.info("traced-but-no-project")
+        }
+
+        let json = try parse(sink.snapshot[0])
+        #expect(json["logging.googleapis.com/trace"] == nil)
+    }
+
+    @Test("empty project ID treated as nil")
+    func emptyProjectIDDisablesTraceFields() async throws {
+        let sink = CapturedSink()
+        let handler = GCPLogHandler(label: "test", gcpProjectID: "", sink: sink.sink)
+        #expect(handler.gcpProjectID == nil)
+        let logger = Logger(label: "test", factory: { _ in handler })
+
+        var ctx = ServiceContext.topLevel
+        ctx.loggingTraceContext = LoggingTraceContext(traceID: "a", spanID: "b")
+        await ServiceContext.withValue(ctx) {
+            logger.info("x")
+        }
+
+        let json = try parse(sink.snapshot[0])
+        #expect(json["logging.googleapis.com/trace"] == nil)
+    }
+
+    @Test("trace_sampled emits 'false' when sampled is false")
+    func sampledFalseEncoded() async throws {
+        let sink = CapturedSink()
+        let handler = GCPLogHandler(label: "test", gcpProjectID: "p", sink: sink.sink)
+        let logger = Logger(label: "test", factory: { _ in handler })
+
+        var ctx = ServiceContext.topLevel
+        ctx.loggingTraceContext = LoggingTraceContext(
+            traceID: "a", spanID: "b", sampled: false
+        )
+        await ServiceContext.withValue(ctx) {
+            logger.info("x")
+        }
+
+        let json = try parse(sink.snapshot[0])
+        #expect(json["logging.googleapis.com/trace_sampled"] as? String == "false")
+    }
+
+    @Test("explicit metadata wins over auto-emitted trace fields")
+    func explicitTraceMetadataWins() async throws {
+        let sink = CapturedSink()
+        let handler = GCPLogHandler(label: "test", gcpProjectID: "p", sink: sink.sink)
+        let logger = Logger(label: "test", factory: { _ in handler })
+
+        var ctx = ServiceContext.topLevel
+        ctx.loggingTraceContext = LoggingTraceContext(traceID: "auto", spanID: "auto-span")
+        await ServiceContext.withValue(ctx) {
+            logger.info("x", metadata: [
+                "logging.googleapis.com/spanId": "manual-override",
+            ])
+        }
+
+        let json = try parse(sink.snapshot[0])
+        #expect(json["logging.googleapis.com/spanId"] as? String == "manual-override")
+        // Trace key still auto-filled because no explicit override:
+        #expect(json["logging.googleapis.com/trace"] as? String == "projects/p/traces/auto")
     }
 
     // MARK: - Concurrent writes

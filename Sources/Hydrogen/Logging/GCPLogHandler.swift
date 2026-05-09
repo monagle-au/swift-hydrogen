@@ -5,6 +5,7 @@
 
 import Foundation
 import Logging
+import ServiceContextModule
 
 /// A swift-log `LogHandler` that emits one structured-JSON record per call,
 /// shaped for ingestion by Google Cloud Logging.
@@ -41,6 +42,13 @@ public struct GCPLogHandler: LogHandler {
     public var metadataProvider: Logger.MetadataProvider?
     public var logLevel: Logger.Level = .info
 
+    /// GCP project ID used to format the `logging.googleapis.com/trace`
+    /// field. Cloud Logging requires the full path
+    /// `projects/<id>/traces/<traceId>` — the project ID has to be
+    /// known at log-write time. When `nil`, trace correlation fields are
+    /// suppressed even if a ``LoggingTraceContext`` is present.
+    public let gcpProjectID: String?
+
     private let sink: Sink
 
     // MARK: - Init
@@ -48,15 +56,22 @@ public struct GCPLogHandler: LogHandler {
     /// Create a handler writing to standard output (the GCP-recommended
     /// stream — Cloud Logging treats stdout/stderr identically but stdout
     /// reads as the more conventional choice for non-error severities).
+    ///
+    /// `gcpProjectID` defaults to `GOOGLE_CLOUD_PROJECT` (Cloud Run
+    /// injects this automatically). Pass an explicit value when running
+    /// outside Cloud Run, or pass `""` to suppress trace correlation
+    /// even when a ``LoggingTraceContext`` is set.
     public init(
         label: String,
         metadataProvider: Logger.MetadataProvider? = nil,
-        logLevel: Logger.Level = .info
+        logLevel: Logger.Level = .info,
+        gcpProjectID: String? = ProcessInfo.processInfo.environment["GOOGLE_CLOUD_PROJECT"]
     ) {
         self.init(
             label: label,
             metadataProvider: metadataProvider,
             logLevel: logLevel,
+            gcpProjectID: gcpProjectID,
             sink: Self.standardOutputSink
         )
     }
@@ -67,11 +82,13 @@ public struct GCPLogHandler: LogHandler {
         label: String,
         metadataProvider: Logger.MetadataProvider? = nil,
         logLevel: Logger.Level = .info,
+        gcpProjectID: String? = ProcessInfo.processInfo.environment["GOOGLE_CLOUD_PROJECT"],
         sink: @escaping Sink
     ) {
         self.label = label
         self.metadataProvider = metadataProvider
         self.logLevel = logLevel
+        self.gcpProjectID = (gcpProjectID?.isEmpty == true) ? nil : gcpProjectID
         self.sink = sink
     }
 
@@ -99,6 +116,22 @@ public struct GCPLogHandler: LogHandler {
         }
         if let explicit = explicitMetadata, !explicit.isEmpty {
             merged.merge(explicit, uniquingKeysWith: { _, new in new })
+        }
+
+        // Cloud Trace correlation. When the active task carries a
+        // `LoggingTraceContext` and we know our project ID, emit the
+        // three magic keys Cloud Logging reads to render the "view trace"
+        // link on each log entry. Caller-supplied metadata wins on
+        // collision — `uniquingKeysWith: { current, _ in current }`
+        // preserves whatever was already merged from explicit/provider/
+        // handler sources.
+        if let projectID = gcpProjectID,
+           let trace = ServiceContext.current?.loggingTraceContext {
+            merged.merge([
+                "logging.googleapis.com/trace": .string("projects/\(projectID)/traces/\(trace.traceID)"),
+                "logging.googleapis.com/spanId": .string(trace.spanID),
+                "logging.googleapis.com/trace_sampled": .string(trace.sampled ? "true" : "false"),
+            ], uniquingKeysWith: { existing, _ in existing })
         }
 
         let payload = LogPayload(
