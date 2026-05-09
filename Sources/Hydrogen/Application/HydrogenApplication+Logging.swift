@@ -43,10 +43,26 @@ extension HydrogenApplication {
     ///   - metadataProvider: Optional cross-cutting metadata source.
     ///     Evaluated on every log call. Defaults to `nil` (no extra
     ///     metadata).
+    ///   - logLevel: Default level applied to every handler this
+    ///     bootstrap produces. When `nil`, ``HydrogenLogging/resolveLogLevel(envVar:)``
+    ///     reads the `LOG_LEVEL` env var; if that's also unset or unparseable,
+    ///     `.info` is used. Bootstrap-time only — apps can still scope a
+    ///     narrower level on individual `Logger` instances.
     public static func bootstrapLogging(
         using factory: @escaping LogHandlerFactory = HydrogenLogging.cloudRunOrStream.asFactory,
-        metadataProvider: Logger.MetadataProvider? = nil
+        metadataProvider: Logger.MetadataProvider? = nil,
+        logLevel: Logger.Level? = nil
     ) {
+        let resolvedLevel = logLevel ?? HydrogenLogging.resolveLogLevel() ?? .info
+        // Wrap the caller-supplied factory so every handler gets the
+        // resolved level applied at construction. `LogHandler.logLevel`
+        // is `var` on the protocol — assignment after init is the
+        // documented swift-log path for level overrides.
+        let leveledFactory: LogHandlerFactory = { label in
+            var handler = factory(label)
+            handler.logLevel = resolvedLevel
+            return handler
+        }
         if let metadataProvider {
             // The (label, provider) factory overload is the swift-log
             // path that wires the global provider through to each
@@ -55,11 +71,11 @@ extension HydrogenApplication {
             // log applies the global provider at log call time anyway,
             // independent of whether the handler knows about it.
             LoggingSystem.bootstrap(
-                { label, _ in factory(label) },
+                { label, _ in leveledFactory(label) },
                 metadataProvider: metadataProvider
             )
         } else {
-            LoggingSystem.bootstrap(factory)
+            LoggingSystem.bootstrap(leveledFactory)
         }
     }
 }

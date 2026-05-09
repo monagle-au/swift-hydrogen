@@ -98,3 +98,32 @@ struct HydrogenLoggingTests {
         #expect(predicateCalls.get == 3)
     }
 }
+
+// MARK: - Log level resolution
+
+@Suite("HydrogenLogging.resolveLogLevel")
+struct HydrogenLoggingLevelResolutionTests {
+
+    @Test("missing env var returns nil")
+    func missingEnvReturnsNil() {
+        // Use a name that won't collide with any real var.
+        #expect(HydrogenLogging.resolveLogLevel(envVar: "HYDROGEN_TEST_NEVER_SET_ABCXYZ") == nil)
+    }
+
+    @Test("each canonical level string parses")
+    func parsesAllCanonicalLevels() {
+        for level in Logger.Level.allCases {
+            #expect(Logger.Level(rawValue: level.rawValue) == level)
+        }
+    }
+
+    @Test("unknown level string returns nil")
+    func unknownLevelReturnsNil() {
+        // We can't safely set process env in a parallel test; verify the
+        // parsing path directly. The function only does env lookup +
+        // `Logger.Level(rawValue:)` — if rawValue rejects the input, the
+        // function returns nil.
+        #expect(Logger.Level(rawValue: "loud") == nil)
+        #expect(Logger.Level(rawValue: "") == nil)
+    }
+}

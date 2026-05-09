@@ -48,8 +48,17 @@ public struct GCPLogHandler: LogHandler {
     /// Create a handler writing to standard output (the GCP-recommended
     /// stream — Cloud Logging treats stdout/stderr identically but stdout
     /// reads as the more conventional choice for non-error severities).
-    public init(label: String, metadataProvider: Logger.MetadataProvider? = nil) {
-        self.init(label: label, metadataProvider: metadataProvider, sink: Self.standardOutputSink)
+    public init(
+        label: String,
+        metadataProvider: Logger.MetadataProvider? = nil,
+        logLevel: Logger.Level = .info
+    ) {
+        self.init(
+            label: label,
+            metadataProvider: metadataProvider,
+            logLevel: logLevel,
+            sink: Self.standardOutputSink
+        )
     }
 
     /// Create a handler with a custom sink. Used by tests to capture output
@@ -57,10 +66,12 @@ public struct GCPLogHandler: LogHandler {
     public init(
         label: String,
         metadataProvider: Logger.MetadataProvider? = nil,
+        logLevel: Logger.Level = .info,
         sink: @escaping Sink
     ) {
         self.label = label
         self.metadataProvider = metadataProvider
+        self.logLevel = logLevel
         self.sink = sink
     }
 
