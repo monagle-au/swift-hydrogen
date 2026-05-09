@@ -49,6 +49,27 @@ public enum HydrogenLogging {
         return env["K_SERVICE"] != nil || env["CLOUD_RUN_JOB"] != nil
     }
 
+    // MARK: - Level resolution
+
+    /// Read a `Logger.Level` from an environment variable.
+    ///
+    /// The variable's value is matched case-insensitively against
+    /// `Logger.Level.rawValue` (`"trace"`, `"debug"`, `"info"`,
+    /// `"notice"`, `"warning"`, `"error"`, `"critical"`). Unknown values
+    /// and a missing variable both return `nil` so the caller can fall
+    /// back to its own default.
+    ///
+    /// Default variable name is `LOG_LEVEL`. Apps that want a more
+    /// specific name (e.g. `MYAPP_LOG_LEVEL`) pass it explicitly.
+    public static func resolveLogLevel(envVar: String = "LOG_LEVEL") -> Logger.Level? {
+        guard let raw = ProcessInfo.processInfo.environment[envVar]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+              !raw.isEmpty
+        else { return nil }
+        return Logger.Level(rawValue: raw)
+    }
+
     // MARK: - Default selector
 
     /// The conventional Hydrogen default: structured JSON when running

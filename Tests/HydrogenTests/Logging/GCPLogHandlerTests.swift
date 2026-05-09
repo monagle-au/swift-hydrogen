@@ -177,6 +177,27 @@ struct GCPLogHandlerTests {
         #expect(sink.snapshot.count == 2)
     }
 
+    @Test("init applies logLevel parameter")
+    func initLogLevelParameter() {
+        let sink = CapturedSink()
+        let handler = GCPLogHandler(label: "test", logLevel: .warning, sink: sink.sink)
+        #expect(handler.logLevel == .warning)
+        let logger = Logger(label: "test", factory: { _ in handler })
+        // Logger's logLevel is initialised from handler.logLevel — debug
+        // and info should be dropped, warning kept.
+        logger.debug("nope")
+        logger.info("nope")
+        logger.warning("yep")
+        #expect(sink.snapshot.count == 1)
+    }
+
+    @Test("init defaults logLevel to .info when not specified")
+    func initLogLevelDefault() {
+        let sink = CapturedSink()
+        let handler = GCPLogHandler(label: "test", sink: sink.sink)
+        #expect(handler.logLevel == .info)
+    }
+
     // MARK: - Concurrent writes
 
     @Test("concurrent log calls produce well-formed lines")
