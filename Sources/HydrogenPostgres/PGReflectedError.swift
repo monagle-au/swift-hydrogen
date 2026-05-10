@@ -5,6 +5,8 @@
 //  Created by David Monagle on 14/9/2024.
 //
 
+#if HYDROGEN_POSTGRES
+
 import Logging
 import PostgresNIO
 
@@ -95,5 +97,7 @@ public func logUnwrappedPostgreSQLErrors<T>(
 ) rethrows -> T {
     try operation()
 }
+
+#endif
 
 #endif

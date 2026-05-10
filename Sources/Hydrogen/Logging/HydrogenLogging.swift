@@ -15,11 +15,16 @@ public typealias LogHandlerFactory = @Sendable (_ label: String) -> any LogHandl
 /// Namespace for Hydrogen's logging conveniences: stock `LogHandler`
 /// factories and a composable environment-driven selector.
 ///
-/// The intent is to make the default sensible (structured JSON in Cloud
-/// Run, plain text on a developer's terminal) without locking apps into
-/// any particular sink — every primitive is exposed so apps can compose
-/// their own selection or wrap multiple sinks via
-/// `MultiplexLogHandler`.
+/// The intent is to make the default sensible (vendor-neutral
+/// structured JSON in cloud environments, plain text on a developer's
+/// terminal) without locking apps into any particular sink — every
+/// primitive is exposed so apps can compose their own selection or
+/// wrap multiple sinks via `MultiplexLogHandler`.
+///
+/// Vendor-specific dialects (e.g. Cloud Logging's magic-key shape)
+/// live in opt-in trait-gated targets: enable the `GCP` package trait
+/// for ``HydrogenGCP`` and use ``HydrogenGCP/cloudRunOrStream`` for
+/// Cloud Logging integration.
 public enum HydrogenLogging {
 
     // MARK: - Stock factories
@@ -31,10 +36,13 @@ public enum HydrogenLogging {
         StreamLogHandler.standardOutput(label: label)
     }
 
-    /// JSON-shaped output recognised by Google Cloud Logging. See
-    /// ``GCPLogHandler``.
-    public static let gcp: LogHandlerFactory = { label in
-        GCPLogHandler(label: label)
+    /// Vendor-neutral structured JSON via ``StructuredLogHandler`` with
+    /// the ``StructuredLogProfile/plain`` profile. Recognised top-level
+    /// fields (`severity`, `time`, `message`) survive ingestion by most
+    /// cloud log aggregators (Cloud Logging, CloudWatch, Loki,
+    /// Datadog) without vendor-specific magic keys.
+    public static let plain: LogHandlerFactory = { label in
+        StructuredLogHandler(label: label, profile: .plain)
     }
 
     // MARK: - Stock predicates
@@ -72,14 +80,17 @@ public enum HydrogenLogging {
 
     // MARK: - Default selector
 
-    /// The conventional Hydrogen default: structured JSON when running
-    /// on Cloud Run, plain text everywhere else (local dev, ad-hoc CLI
-    /// invocations, CI).
+    /// The conventional Hydrogen default: vendor-neutral structured
+    /// JSON (``plain``) when running on Cloud Run / Cloud Run Jobs,
+    /// plain text everywhere else (local dev, ad-hoc CLI invocations,
+    /// CI).
     ///
-    /// Apps wanting a different mix should construct their own
-    /// ``EnvironmentSelector`` rather than mutating this value.
+    /// Apps that want Cloud Logging's magic-key dialect (the `view
+    /// trace` link, GCP-specific severity strings, etc.) should enable
+    /// the `GCP` package trait and use ``HydrogenGCP/cloudRunOrStream``
+    /// from the `HydrogenGCP` target instead.
     public static let cloudRunOrStream = EnvironmentSelector(
-        entries: [(isCloudRun, gcp)],
+        entries: [(isCloudRun, plain)],
         fallback: stream
     )
 
@@ -95,7 +106,7 @@ public enum HydrogenLogging {
     /// let selector = HydrogenLogging.EnvironmentSelector(
     ///     entries: [
     ///         ({ ProcessInfo.processInfo.environment["DD_AGENT_HOST"] != nil }, datadogFactory),
-    ///         (HydrogenLogging.isCloudRun, HydrogenLogging.gcp),
+    ///         (HydrogenLogging.isCloudRun, HydrogenLogging.plain),
     ///     ],
     ///     fallback: HydrogenLogging.stream
     /// )

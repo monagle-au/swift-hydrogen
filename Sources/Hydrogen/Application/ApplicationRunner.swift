@@ -34,11 +34,16 @@ struct ApplicationRunner: Sendable {
     ///   - requiredServices: The key types whose transitive dependencies should be
     ///     included in the service group. Pass the keys declared by the active command.
     ///   - mode: Whether the invocation is a persistent or task run.
+    ///   - lifecycleServices: Pre-built services from the active ``BootstrapPlan``
+    ///     (e.g. an OTel exporter). They start before user services so telemetry is
+    ///     flowing as the application's own services come up. Not registered through
+    ///     ``ServiceRegistry`` because they're not addressed by ``ServiceKey``.
     ///   - execute: An optional async closure to wrap in a ``CommandExecutionService``
     ///     (task mode only). Pass `nil` for persistent commands.
     func run(
         requiredServices: [any ServiceKey.Type],
         mode: ServiceLifecycleMode = .persistent,
+        lifecycleServices: [LifecycleService] = [],
         execute: (@Sendable (ServiceValues) async throws -> Void)? = nil
     ) async throws {
         // Build an identifier → entry lookup map.
@@ -76,6 +81,17 @@ struct ApplicationRunner: Sendable {
         // Build services in dependency order, accumulating ServiceValues.
         var values = ServiceValues()
         var serviceConfigs: [ServiceGroupConfiguration.ServiceConfiguration] = []
+
+        // Lifecycle services from the bootstrap plan run ahead of user
+        // services so exporters/shippers are draining as soon as the first
+        // user service starts.
+        for ls in lifecycleServices {
+            var cfg = ServiceGroupConfiguration.ServiceConfiguration(service: ls.service)
+            if ls.mode == .task {
+                cfg.successTerminationBehavior = .gracefullyShutdownGroup
+            }
+            serviceConfigs.append(cfg)
+        }
 
         for item in sorted {
             let service = try await withBuildSpan(label: item.entry.label) {

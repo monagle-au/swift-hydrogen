@@ -5,6 +5,8 @@
 //  Created by David Monagle on 17/9/2024.
 //
 
+#if HYDROGEN_POSTGRES
+
 import Configuration
 import NIOSSL
 import PostgresNIO
@@ -140,3 +142,5 @@ extension TLSVersion: @retroactive RawRepresentable {
         }
     }
 }
+
+#endif

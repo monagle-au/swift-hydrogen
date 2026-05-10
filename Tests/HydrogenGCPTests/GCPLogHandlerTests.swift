@@ -3,12 +3,15 @@
 //  swift-hydrogen
 //
 
+#if HYDROGEN_GCP
+
 import Foundation
+import Hydrogen
 import Logging
 import ServiceContextModule
 import Synchronization
 import Testing
-@testable import Hydrogen
+@testable import HydrogenGCP
 
 /// Captures log lines into an in-memory buffer for assertions.
 private final class CapturedSink: Sendable {
@@ -316,3 +319,5 @@ struct GCPLogHandlerTests {
 }
 
 private enum GCPLogTestError: Error { case notADictionary }
+
+#endif

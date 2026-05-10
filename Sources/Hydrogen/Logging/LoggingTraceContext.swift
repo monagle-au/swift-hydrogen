@@ -6,19 +6,23 @@
 import ServiceContextModule
 
 /// Trace identity surfaced into log lines for correlating logs with traces
-/// in Cloud Logging / Cloud Trace.
+/// emitted by any active tracer.
 ///
 /// Hydrogen does not produce these IDs — that's the tracer's job. Apps
 /// running an OpenTelemetry tracer (or any other span emitter) populate
 /// this key on the active ``ServiceContext`` at span entry. When set,
-/// ``GCPLogHandler`` reads it on every log call and adds the
+/// ``StructuredLogHandler`` calls
+/// ``StructuredLogProfile/traceCorrelation`` to convert the IDs into
+/// vendor-specific log metadata. The
+/// ``StructuredLogProfile/plain`` profile emits no correlation by
+/// default; the GCP profile (in the `HydrogenGCP` target) emits the
 /// `logging.googleapis.com/trace`, `.../spanId`, and `.../trace_sampled`
 /// fields recognised by Cloud Logging.
 ///
 /// The IDs follow the W3C Trace Context spec:
 /// 32 lower-case hex chars for `traceID`, 16 for `spanID`. Cloud Logging
-/// requires those exact shapes — anything else gets emitted as plain
-/// metadata without the "view trace" link.
+/// (and most other ingesters) require those exact shapes — anything
+/// else gets emitted as plain metadata without the "view trace" link.
 ///
 /// Decoupling note: this type names neither OpenTelemetry nor any other
 /// tracing implementation. The bridge from the tracer's span context to
@@ -53,8 +57,10 @@ extension ServiceContext {
 
     /// The trace context associated with this `ServiceContext`, if any.
     ///
-    /// Set this in your tracing setup at span entry; ``GCPLogHandler``
-    /// reads it from `ServiceContext.current` on every log call.
+    /// Set this in your tracing setup at span entry;
+    /// ``StructuredLogHandler`` reads it from `ServiceContext.current`
+    /// on every log call and routes through the active profile's
+    /// ``StructuredLogProfile/traceCorrelation`` formatter.
     public var loggingTraceContext: LoggingTraceContext? {
         get { self[LoggingTraceContextKey.self] }
         set { self[LoggingTraceContextKey.self] = newValue }

@@ -5,6 +5,8 @@
 //  Created by David Monagle on 4/5/2025.
 //
 
+#if HYDROGEN_POSTGRES
+
 import Foundation
 import PostgresNIO
 
@@ -38,3 +40,5 @@ extension PostgresData {
         value.map { PostgresData(int: $0) } ?? .null
     }
 }
+
+#endif

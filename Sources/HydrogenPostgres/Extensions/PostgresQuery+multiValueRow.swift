@@ -5,6 +5,8 @@
 //  Created by David Monagle on 21/1/2025.
 //
 
+#if HYDROGEN_POSTGRES
+
 import PostgresNIO
 import Foundation
 
@@ -85,3 +87,5 @@ fileprivate extension Sequence {
         return (placeholders: placeholders.joined(separator: ","), bindings: bindings)
     }
 }
+
+#endif
