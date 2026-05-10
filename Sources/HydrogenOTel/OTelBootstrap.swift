@@ -35,8 +35,10 @@ extension HydrogenOTel {
     ///   - logsEnabled: Whether OTel should also bootstrap the logging
     ///     subsystem with an OTLP backend. When `true`, OTel takes over
     ///     `LoggingSystem` — apps that want a different log handler
-    ///     (e.g. ``GCPLogHandler``) should pass `false` here and bootstrap
-    ///     their own logger via ``BootstrapPlan/logHandlerFactory`` (set
+    ///     (e.g. ``StructuredLogHandler`` with the
+    ///     ``StructuredLogProfile/plain`` or `.gcp(projectID:)` profile)
+    ///     should pass `false` here and bootstrap their own logger via
+    ///     ``BootstrapPlan/logHandlerFactory`` (set
     ///     ``BootstrapPlan/loggerMetadataProvider`` to
     ///     `OTel.makeLoggingMetadataProvider()` so logs still carry
     ///     trace IDs).

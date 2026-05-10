@@ -3,7 +3,10 @@
 //  swift-hydrogen
 //
 
+#if HYDROGEN_GCP
+
 import Foundation
+import Hydrogen
 import Tracing
 import ServiceContextModule
 
@@ -127,3 +130,5 @@ public final class GCPSpan: Tracing.Span, @unchecked Sendable {
         }
     }
 }
+
+#endif

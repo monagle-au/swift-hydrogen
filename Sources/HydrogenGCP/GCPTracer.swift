@@ -3,7 +3,10 @@
 //  swift-hydrogen
 //
 
+#if HYDROGEN_GCP
+
 import Foundation
+import Hydrogen
 import Instrumentation
 import Tracing
 import ServiceContextModule
@@ -222,3 +225,5 @@ extension HydrogenApplication {
         Task { await exporter.run() }
     }
 }
+
+#endif

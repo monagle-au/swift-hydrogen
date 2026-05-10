@@ -24,12 +24,18 @@ let package = Package(
             name: "HydrogenOTel",
             targets: ["HydrogenOTel"]
         ),
+        // Opt-in via the `GCP` package trait. Bundles the Cloud Trace
+        // tracer, Cloud Trace exporter, and the Cloud Logging-shaped
+        // GCPLogHandler.
+        .library(
+            name: "HydrogenGCP",
+            targets: ["HydrogenGCP"]
+        ),
     ],
     traits: [
         // Opt-in for consumers — the bare `Hydrogen` library has no transitive
-        // postgres-nio or swift-otel dependency. Consumers add `traits: ["Postgres"]`
-        // and/or `traits: ["OTel"]` on the package import to enable the matching
-        // library product.
+        // postgres-nio, swift-otel, or GCP dependency. Consumers add the
+        // matching trait on the package import to enable each library product.
         .default(enabledTraits: []),
         .trait(
             name: "Postgres",
@@ -38,6 +44,10 @@ let package = Package(
         .trait(
             name: "OTel",
             description: "Enable the HydrogenOTel target and the swift-otel dependency."
+        ),
+        .trait(
+            name: "GCP",
+            description: "Enable the HydrogenGCP target (Cloud Trace + Cloud Logging integration)."
         ),
     ],
     dependencies: [
@@ -115,6 +125,20 @@ let package = Package(
             ]
         ),
 
+        // MARK: - HydrogenGCP (GCP trait)
+        // Hosts the Cloud Trace tracer/exporter and the Cloud Logging
+        // GCPLogHandler. The handler delegates to the vendor-neutral
+        // ``StructuredLogHandler`` in core with the .gcp profile.
+        .target(
+            name: "HydrogenGCP",
+            dependencies: [
+                "Hydrogen",
+            ],
+            swiftSettings: [
+                .define("HYDROGEN_GCP", .when(traits: ["GCP"])),
+            ]
+        ),
+
         // MARK: - Tests
         .testTarget(
             name: "HydrogenTests",
@@ -137,6 +161,15 @@ let package = Package(
             ],
             swiftSettings: [
                 .define("HYDROGEN_OTEL", .when(traits: ["OTel"])),
+            ]
+        ),
+        .testTarget(
+            name: "HydrogenGCPTests",
+            dependencies: [
+                "HydrogenGCP",
+            ],
+            swiftSettings: [
+                .define("HYDROGEN_GCP", .when(traits: ["GCP"])),
             ]
         ),
     ]

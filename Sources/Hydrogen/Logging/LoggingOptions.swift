@@ -66,7 +66,11 @@ public struct LoggingOptions: ParsableArguments, Sendable {
         /// Defer to the supplied default factory (e.g. JSON in Cloud Run,
         /// plain text on a developer's terminal).
         case auto
-        /// Force structured JSON output via ``GCPLogHandler``.
+        /// Force vendor-neutral structured JSON output via
+        /// ``StructuredLogHandler`` with the ``StructuredLogProfile/plain``
+        /// profile. Apps that want Cloud Logging's magic-key dialect
+        /// should enable the `GCP` package trait and override the
+        /// factory in their ``HydrogenCommand/bootstrap(config:environment:)``.
         case json
         /// Force plain stream output regardless of environment.
         case text
@@ -76,7 +80,7 @@ public struct LoggingOptions: ParsableArguments, Sendable {
         public func factory(default fallback: @escaping LogHandlerFactory) -> LogHandlerFactory {
             switch self {
             case .auto: return fallback
-            case .json: return HydrogenLogging.gcp
+            case .json: return HydrogenLogging.plain
             case .text: return HydrogenLogging.stream
             }
         }

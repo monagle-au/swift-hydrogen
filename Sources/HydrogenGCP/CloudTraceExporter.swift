@@ -3,11 +3,14 @@
 //  swift-hydrogen
 //
 
+#if HYDROGEN_GCP
+
 import Foundation
 #if canImport(FoundationNetworking)
 // On Linux, URL/HTTP networking types live in a separate module.
 import FoundationNetworking
 #endif
+import Hydrogen
 import Tracing
 
 /// Buffers finished spans and uploads them to the Cloud Trace v2 REST API in
@@ -219,3 +222,5 @@ public actor CloudTraceExporter {
         return f
     }()
 }
+
+#endif
