@@ -71,6 +71,12 @@ let package = Package(
         // postgres-nio: resolved at the package level, conditionally linked
         // by trait.
         .package(url: "https://github.com/swift-otel/swift-otel.git", from: "1.0.0"),
+
+        // DocC plugin — build-tool only. Powers
+        // `swift package generate-documentation` for the four DocC
+        // catalogs in this repo (Hydrogen, HydrogenPostgres, HydrogenOTel,
+        // HydrogenGCP). Adds nothing at runtime.
+        .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.4.0"),
     ],
     targets: [
         // MARK: - Core
