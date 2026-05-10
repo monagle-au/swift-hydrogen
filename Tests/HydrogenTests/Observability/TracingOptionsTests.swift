@@ -4,8 +4,30 @@
 //
 
 import ArgumentParser
+import Configuration
 @testable import Hydrogen
 import Testing
+
+/// Build an in-memory `ConfigReader` from a flat `[String: String]`
+/// map of dotted-path keys.
+private func makeConfig(_ values: [String: String]) async -> ConfigReader {
+    var converted: [AbsoluteConfigKey: ConfigValue] = [:]
+    for (k, v) in values {
+        let key = AbsoluteConfigKey(k.split(separator: ".").map(String.init))
+        let content: ConfigContent
+        if let i = Int(v) {
+            content = .int(i)
+        } else if let b = Bool(v) {
+            content = .bool(b)
+        } else if let d = Double(v) {
+            content = .double(d)
+        } else {
+            content = .string(v)
+        }
+        converted[key] = ConfigValue(content, isSecret: false)
+    }
+    return ConfigReader(provider: InMemoryProvider(values: converted))
+}
 
 @Suite("TracingOptions")
 struct TracingOptionsTests {
@@ -47,6 +69,42 @@ struct TracingOptionsTests {
         let opts = try TracingOptions.parse(["--trace", "--trace-sample", "0.25"])
         #expect(opts.sampleRate == 0.25)
     }
+
+    // MARK: - merging(from:)
+
+    @Test("merging enables tracing from config when CLI was silent")
+    func mergingEnablesFromConfig() async throws {
+        let opts = try TracingOptions.parse([])
+        let config = await makeConfig([
+            "tracing.enabled": "true",
+            "tracing.endpoint": "collector:4317",
+            "tracing.serviceName": "svc",
+            "tracing.sampleRate": "0.5",
+        ])
+        let merged = opts.merging(from: config.scoped(to: "tracing"))
+        #expect(merged.enabled == true)
+        #expect(merged.endpoint == "collector:4317")
+        #expect(merged.serviceName == "svc")
+        #expect(merged.sampleRate == 0.5)
+    }
+
+    @Test("merging: CLI endpoint wins over config endpoint")
+    func mergingEndpointPrecedence() async throws {
+        let opts = try TracingOptions.parse([
+            "--trace", "--otel-endpoint", "cli:4317",
+        ])
+        let config = await makeConfig(["tracing.endpoint": "config:4317"])
+        let merged = opts.merging(from: config.scoped(to: "tracing"))
+        #expect(merged.endpoint == "cli:4317")
+    }
+
+    @Test("merging: CLI --trace stays enabled even if config says false")
+    func mergingCLIEnabledStaysOn() async throws {
+        let opts = try TracingOptions.parse(["--trace"])
+        let config = await makeConfig(["tracing.enabled": "false"])
+        let merged = opts.merging(from: config.scoped(to: "tracing"))
+        #expect(merged.enabled == true)
+    }
 }
 
 @Suite("MetricsOptions")
@@ -75,5 +133,19 @@ struct MetricsOptionsTests {
         ])
         #expect(opts.endpoint == "localhost:4318")
         #expect(opts.intervalSeconds == 30)
+    }
+
+    @Test("merging fills metrics fields from config when CLI is silent")
+    func mergingFromConfig() async throws {
+        let opts = try MetricsOptions.parse([])
+        let config = await makeConfig([
+            "metrics.enabled": "true",
+            "metrics.endpoint": "collector:4318",
+            "metrics.intervalSeconds": "60",
+        ])
+        let merged = opts.merging(from: config.scoped(to: "metrics"))
+        #expect(merged.enabled == true)
+        #expect(merged.endpoint == "collector:4318")
+        #expect(merged.intervalSeconds == 60)
     }
 }

@@ -4,6 +4,7 @@
 //
 
 import ArgumentParser
+import Configuration
 
 /// Reusable `ParsableArguments` for command-line tracing configuration.
 ///
@@ -67,4 +68,40 @@ public struct TracingOptions: ParsableArguments, Sendable {
     public var sampleRate: Double?
 
     public init() {}
+
+    /// Returns a copy of these options with any unset CLI fields filled
+    /// from the supplied ``ConfigReader`` scope. CLI-supplied values
+    /// always win; config fills the gap when CLI was silent.
+    ///
+    /// Looks up these keys in the supplied scope (typical full keys
+    /// after `config.scoped(to: "tracing")`):
+    ///
+    /// | Field         | Config key      |
+    /// |---------------|-----------------|
+    /// | `enabled`     | `enabled`       |
+    /// | `endpoint`    | `endpoint`      |
+    /// | `serviceName` | `serviceName`   |
+    /// | `sampleRate`  | `sampleRate`    |
+    ///
+    /// The CLI default for ``enabled`` is `false` and there's no way to
+    /// distinguish "left at default" from "explicitly --no-trace". Config
+    /// can therefore *enable* tracing when CLI is silent or false but
+    /// can't be overridden by `--no-trace` once enabled there. To
+    /// disable, omit the env var or set the config key to `false`.
+    public func merging(from config: ConfigReader) -> TracingOptions {
+        var copy = self
+        if !copy.enabled, let configEnabled = config.bool(forKey: "enabled") {
+            copy.enabled = configEnabled
+        }
+        if copy.endpoint == nil {
+            copy.endpoint = config.string(forKey: "endpoint")
+        }
+        if copy.serviceName == nil {
+            copy.serviceName = config.string(forKey: "serviceName")
+        }
+        if copy.sampleRate == nil {
+            copy.sampleRate = config.double(forKey: "sampleRate")
+        }
+        return copy
+    }
 }

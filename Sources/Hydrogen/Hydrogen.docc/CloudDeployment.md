@@ -76,7 +76,10 @@ service:
 
 ```bash
 HYDROGEN_ENVIRONMENT=production
-LOG_LEVEL=info
+LOGGING_LEVEL=info
+LOGGING_FORMAT=json
+TRACING_ENABLED=true
+TRACING_ENDPOINT=otel-collector:4317
 postgres.host=10.0.0.42
 postgres.password=...           # set via secret manager
 ```
@@ -84,6 +87,48 @@ postgres.password=...           # set via secret manager
 Override ``HydrogenApplication/configReader(for:)`` to layer
 secrets from your vendor's secret manager via an
 `InMemoryProvider`-style adapter loaded at startup.
+
+### Driving observability from env vars
+
+Each observability option group (``LoggingOptions``,
+``TracingOptions``, ``MetricsOptions``, plus the OTel-specific
+ones in ``HydrogenOTel``) exposes a `merging(from:)` method that
+fills any unset CLI fields from a ``Configuration/ConfigReader``
+scope. CLI takes precedence; config fills the gap. This lets a
+managed-runtime operator set everything via env vars without
+touching the binary or its arguments:
+
+```swift
+struct Serve: PersistentCommand {
+    typealias App = MyApp
+    @OptionGroup var logging: LoggingOptions
+    @OptionGroup var tracing: TracingOptions
+
+    func bootstrap(config: ConfigReader, environment: Environment) -> BootstrapPlan {
+        let log = logging.merging(from: config.scoped(to: "logging"))
+        let trace = tracing.merging(from: config.scoped(to: "tracing"))
+
+        var plan = BootstrapPlan()
+        plan.logLevel = log.resolvedLogLevel
+        plan.logHandlerFactory = log.format.factory(default: HydrogenLogging.cloudRunOrStream.asFactory)
+        // ... use trace.endpoint etc. to build an Instrument and assign plan.instrument
+        return plan
+    }
+}
+```
+
+Precedence on every field is:
+
+1. **CLI flag** (when explicitly set on the command line).
+2. **`ConfigReader` value** (env var, `.env`, in-memory provider).
+3. **Built-in default** (typically `nil` / `false` / `.auto`).
+
+Booleans deserve a small footnote: ArgumentParser can't tell
+"the user left `--trace` at its default" from "the user passed
+`--no-trace`", so config can *enable* a flag when CLI is silent
+or false but can't be overridden by `--no-trace` once enabled in
+config. To explicitly disable, omit the env var or set the
+config key to `false`.
 
 ## Picking a logging dialect
 

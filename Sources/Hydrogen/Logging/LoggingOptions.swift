@@ -4,6 +4,7 @@
 //
 
 import ArgumentParser
+import Configuration
 import Logging
 
 /// Reusable `ParsableArguments` for command-line logging configuration.
@@ -60,6 +61,49 @@ public struct LoggingOptions: ParsableArguments, Sendable {
               !raw.isEmpty
         else { return nil }
         return Logger.Level(rawValue: raw)
+    }
+
+    /// Returns a copy of these options with any unset CLI fields filled
+    /// from the supplied ``ConfigReader`` scope. CLI-supplied values
+    /// always win; config fills the gap when CLI was silent.
+    ///
+    /// Looks up these keys in the supplied scope (typical full keys
+    /// after `config.scoped(to: "logging")`):
+    ///
+    /// | Field      | Config key | Example env var      |
+    /// |------------|------------|----------------------|
+    /// | `logLevel` | `level`    | `LOGGING_LEVEL=debug`|
+    /// | `format`   | `format`   | `LOGGING_FORMAT=json`|
+    ///
+    /// The exact env-var spelling depends on which `ConfigProvider`
+    /// the app composes (e.g. `EnvironmentVariablesProvider`'s default
+    /// dotted-key mapping is uppercase + underscores).
+    ///
+    /// Use inside ``HydrogenCommand/bootstrap(config:environment:)``:
+    ///
+    /// ```swift
+    /// func bootstrap(config: ConfigReader, environment: Environment) -> BootstrapPlan {
+    ///     let opts = logging.merging(from: config.scoped(to: "logging"))
+    ///     var plan = BootstrapPlan()
+    ///     plan.logLevel = opts.resolvedLogLevel
+    ///     plan.logHandlerFactory = opts.format.factory(default: HydrogenLogging.cloudRunOrStream.asFactory)
+    ///     return plan
+    /// }
+    /// ```
+    public func merging(from config: ConfigReader) -> LoggingOptions {
+        var copy = self
+        if copy.logLevel == nil, let raw = config.string(forKey: "level") {
+            copy.logLevel = raw
+        }
+        // CLI default is `.auto`, which means "defer to the supplied
+        // factory". Treat `.auto` as the unset state so config can
+        // override; if CLI explicitly set `.json` or `.text`, leave it.
+        if copy.format == .auto, let raw = config.string(forKey: "format"),
+           let parsed = LogFormat(rawValue: raw.lowercased())
+        {
+            copy.format = parsed
+        }
+        return copy
     }
 
     public enum LogFormat: String, CaseIterable, ExpressibleByArgument, Sendable {

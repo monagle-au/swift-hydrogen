@@ -93,6 +93,41 @@ internally; see
 [`OTel+Configuration`](https://github.com/swift-otel/swift-otel/blob/main/Sources/OTel/OTelAPI/OTel%2BConfiguration.swift)
 for the full list.
 
+### Hydrogen-style config (env via swift-configuration)
+
+Beyond the OTel-spec env vars, the
+``OTelTracingOptions/merging(from:)`` and
+``OTelMetricsOptions/merging(from:)`` methods let env vars flow
+through the same ``Configuration/ConfigReader`` an app already
+uses for its other settings. Pair the option groups with a
+config-driven fallback:
+
+```swift
+func bootstrap(config: ConfigReader, environment: Environment) throws -> BootstrapPlan {
+    let trace = tracing.merging(from: config.scoped(to: "tracing"))
+    let metrics = metrics.merging(from: config.scoped(to: "metrics"))
+    return try HydrogenOTel.makeBootstrap(
+        serviceName: App.identifier,
+        tracing: trace,
+        metrics: metrics
+    )
+}
+```
+
+Operators can now drive the same fields via env vars:
+
+```bash
+TRACING_ENABLED=true
+TRACING_ENDPOINT=otel-collector:4317
+TRACING_SAMPLE_RATE=0.1
+METRICS_ENABLED=true
+METRICS_ENDPOINT=otel-collector:4318
+```
+
+…or via a `.env` file, secret-manager-backed provider, or
+anything else `ConfigReader` supports. CLI flags still win when
+explicitly passed.
+
 ## Combine with a different log handler
 
 By default `makeBootstrap(logsEnabled: false)` leaves the logging

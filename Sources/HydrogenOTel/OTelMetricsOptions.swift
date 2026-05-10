@@ -6,6 +6,7 @@
 #if HYDROGEN_OTEL
 
 import ArgumentParser
+import Configuration
 
 /// Opinionated `ParsableArguments` for OTel metrics configuration.
 public struct OTelMetricsOptions: ParsableArguments, Sendable {
@@ -27,6 +28,28 @@ public struct OTelMetricsOptions: ParsableArguments, Sendable {
     public var endpoint: String?
 
     public init() {}
+
+    /// Returns a copy of these options with any unset CLI fields filled
+    /// from the supplied ``ConfigReader`` scope. CLI-supplied values
+    /// always win; config fills the gap when CLI was silent.
+    ///
+    /// Looks up these keys in the supplied scope (typical full keys
+    /// after `config.scoped(to: "metrics")`):
+    ///
+    /// | Field      | Config key  |
+    /// |------------|-------------|
+    /// | `enabled`  | `enabled`   |
+    /// | `endpoint` | `endpoint`  |
+    public func merging(from config: ConfigReader) -> OTelMetricsOptions {
+        var copy = self
+        if !copy.enabled, let configEnabled = config.bool(forKey: "enabled") {
+            copy.enabled = configEnabled
+        }
+        if copy.endpoint == nil {
+            copy.endpoint = config.string(forKey: "endpoint")
+        }
+        return copy
+    }
 }
 
 #endif

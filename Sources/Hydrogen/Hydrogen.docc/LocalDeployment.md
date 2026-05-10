@@ -44,12 +44,15 @@ The simplest knob is `LOG_LEVEL`:
 LOG_LEVEL=debug swift run my-app
 ```
 
-When a command composes ``LoggingOptions``, the same value can come
-from `--log-level=debug` instead. CLI takes precedence over the
-env var, which takes precedence over the in-code default
-(``Logger/Level/info``). See
-``HydrogenLogging/resolveLogLevel(envVar:)`` for the resolution
-order.
+When a command composes ``LoggingOptions`` and calls
+``LoggingOptions/merging(from:)`` with the app's
+``Configuration/ConfigReader``, the level can also come from a
+config key — typically `logging.level`, which an
+`EnvironmentVariablesProvider` reads as `LOGGING_LEVEL=debug`.
+CLI takes precedence over config, which takes precedence over
+the legacy `LOG_LEVEL` env var read by
+``HydrogenLogging/resolveLogLevel(envVar:)``, which takes
+precedence over the in-code default (``Logger/Level/info``).
 
 ## Pick a log format
 

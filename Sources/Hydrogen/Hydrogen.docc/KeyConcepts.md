@@ -189,6 +189,16 @@ These are vendor-neutral data containers; the command's
 write their own `ParsableArguments` — these types are
 conveniences, not requirements.
 
+Each option group also exposes a `merging(from: ConfigReader)`
+method so the same fields can be populated from env vars, `.env`
+files, or any other `ConfigProvider`. Precedence is CLI > config
+> default — explicitly-passed CLI flags always win, config
+fills any field the user didn't set, and built-in defaults
+(`nil` / `false` / `.auto`) are the final fallback. See
+``LoggingOptions/merging(from:)``,
+``TracingOptions/merging(from:)``, and
+``MetricsOptions/merging(from:)``.
+
 For the actual log handler, ``StructuredLogHandler`` emits
 JSON-per-line shaped by a ``StructuredLogProfile``.
 ``StructuredLogProfile/plain`` is the vendor-neutral default.
