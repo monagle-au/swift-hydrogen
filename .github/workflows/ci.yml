@@ -1,8 +1,11 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
+  # Only run CI on pull requests targeting main. Branch protection
+  # enforces that every change to main goes through a PR, so a
+  # `push: main` trigger here would just duplicate the PR run on
+  # the resulting merge commit. Tag pushes are handled by
+  # release.yml as the release gate.
   pull_request:
     branches: [main]
 
