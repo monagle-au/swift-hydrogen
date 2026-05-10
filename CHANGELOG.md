@@ -8,7 +8,7 @@ from `1.0.0` onwards.
 
 ## [Unreleased]
 
-## [1.0.0] — YYYY-MM-DD
+## [1.0.0] — 2026-05-10
 
 The first stable release. From this point on, public-API changes
 follow strict SemVer.
