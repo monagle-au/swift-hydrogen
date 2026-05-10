@@ -12,32 +12,66 @@ concurrency:
 
 jobs:
   macos:
-    name: macOS (Swift 6.2)
+    name: macOS / ${{ matrix.label }}
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: no traits
+            traits: ""
+          - label: all traits
+            traits: "--traits Postgres,OTel,GCP"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build
+        run: swift build -v ${{ matrix.traits }}
+
+      - name: Test
+        run: swift test -v ${{ matrix.traits }}
+
+  linux:
+    name: Linux / ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    container: swift:6.2-noble
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: no traits
+            traits: ""
+          - label: all traits
+            traits: "--traits Postgres,OTel,GCP"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build
+        run: swift build -v ${{ matrix.traits }}
+
+      - name: Test
+        run: swift test -v ${{ matrix.traits }}
+
+  docs:
+    name: DocC build
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 
-      - name: Swift version
-        run: swift --version
+      - name: Build documentation (Hydrogen)
+        run: swift package generate-documentation --target Hydrogen
 
-      - name: Build
-        run: swift build -v
+      - name: Build documentation (HydrogenPostgres)
+        run: swift package --traits Postgres generate-documentation --target HydrogenPostgres
 
-      - name: Test
-        run: swift test -v
+      - name: Build documentation (HydrogenOTel)
+        run: swift package --traits OTel generate-documentation --target HydrogenOTel
 
-  linux:
-    name: Linux (Swift 6.2)
-    runs-on: ubuntu-latest
-    container: swift:6.2-noble
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Swift version
-        run: swift --version
-
-      - name: Build
-        run: swift build -v
-
-      - name: Test
-        run: swift test -v
+      - name: Build documentation (HydrogenGCP)
+        run: swift package --traits GCP generate-documentation --target HydrogenGCP
