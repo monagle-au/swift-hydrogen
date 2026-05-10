@@ -7,6 +7,7 @@ import ArgumentParser
 import Configuration
 import Logging
 import ServiceContextModule
+import ServiceLifecycle
 
 // MARK: - UncheckedSendableBox
 
@@ -73,6 +74,43 @@ public protocol HydrogenCommand: AsyncParsableCommand {
     /// You rarely need to set this directly — prefer conforming to ``PersistentCommand``
     /// or ``TaskCommand`` instead.
     var lifecycleMode: ServiceLifecycleMode { get }
+
+    /// Build a ``BootstrapPlan`` from this command's parsed flags, the
+    /// application's ``ConfigReader``, and the active ``Environment``.
+    ///
+    /// Called by the default ``run()`` implementation after ArgumentParser
+    /// has parsed the command but before any service is built or any
+    /// `Logger` is constructed. The returned plan is applied through
+    /// ``BootstrapCoordinator/shared`` so the global one-shots
+    /// (`InstrumentationSystem.bootstrap`, `MetricsSystem.bootstrap`,
+    /// `LoggingSystem.bootstrap`) happen at the right point in the
+    /// lifecycle and can be driven by `@Option` / `@Flag` values on the
+    /// command.
+    ///
+    /// The default implementation returns an empty plan, which leaves the
+    /// global subsystems on their swift-log / swift-metrics /
+    /// swift-distributed-tracing defaults. Override to compose flags via
+    /// reusable `@OptionGroup` types (``LoggingOptions``, ``TracingOptions``,
+    /// ``MetricsOptions``) or to construct a tracer (e.g. via the
+    /// `HydrogenOTel` target) at startup.
+    ///
+    /// ```swift
+    /// struct Serve: PersistentCommand {
+    ///     typealias App = MyApp
+    ///     @OptionGroup var logging: LoggingOptions
+    ///     var requiredServices: [any ServiceKey.Type] { [PostgresServiceKey.self] }
+    ///
+    ///     func bootstrap(config: ConfigReader, environment: Environment) -> BootstrapPlan {
+    ///         var plan = BootstrapPlan()
+    ///         plan.logLevel = logging.logLevel
+    ///         return plan
+    ///     }
+    /// }
+    /// ```
+    func bootstrap(
+        config: ConfigReader,
+        environment: Environment
+    ) async throws -> BootstrapPlan
 }
 
 extension HydrogenCommand {
@@ -82,23 +120,48 @@ extension HydrogenCommand {
     /// Default lifecycle mode — persistent.
     public var lifecycleMode: ServiceLifecycleMode { .persistent }
 
+    /// Default empty bootstrap plan — leaves global subsystems on their
+    /// library defaults. Apps that want CLI-flag-driven log levels,
+    /// telemetry endpoints, or metadata providers override this method.
+    public func bootstrap(
+        config: ConfigReader,
+        environment: Environment
+    ) async throws -> BootstrapPlan {
+        BootstrapPlan()
+    }
+
     /// Default `run()` implementation wired into ArgumentParser.
     ///
     /// This implementation:
     /// 1. Reads the active ``Environment`` from the current ``ServiceContext``,
     ///    falling back to `.development` if not set.
     /// 2. Calls `App.configReader(for:)` to build the ``ConfigReader``.
-    /// 3. Calls `App.configure(_:)` to populate a ``ServiceRegistry``.
-    /// 4. Creates an ``ApplicationRunner`` and invokes ``ApplicationRunner/run(requiredServices:mode:execute:)``.
+    /// 3. Calls ``bootstrap(config:environment:)`` and applies the returned
+    ///    plan via ``BootstrapCoordinator/shared`` — this is where the
+    ///    global `LoggingSystem`/`MetricsSystem`/`InstrumentationSystem`
+    ///    bootstraps happen, after CLI parsing and before any logger or
+    ///    service is constructed.
+    /// 4. Constructs the application's root `Logger` (now safely uses the
+    ///    bootstrapped handler factory).
+    /// 5. Calls `App.configure(_:)` to populate a ``ServiceRegistry``.
+    /// 6. Creates an ``ApplicationRunner`` and invokes
+    ///    ``ApplicationRunner/run(requiredServices:mode:lifecycleServices:execute:)``,
+    ///    passing the plan's ``BootstrapPlan/lifecycleServices`` so things
+    ///    like an OTel exporter run alongside user services.
     ///
-    /// The lifecycle mode is determined by `lifecycleMode`, which ``TaskCommand`` sets to `.task`.
+    /// The lifecycle mode is determined by `lifecycleMode`, which
+    /// ``TaskCommand`` sets to `.task`.
     public func run() async throws {
         let environment = ServiceContext.active.environment ?? .development
         let config = try await App.configReader(for: environment)
-        var registry = ServiceRegistry()
-        App.configure(&registry)
+
+        let plan = try await bootstrap(config: config, environment: environment)
+        BootstrapCoordinator.shared.apply(plan)
 
         let logger = Logger(label: App.identifier)
+
+        var registry = ServiceRegistry()
+        App.configure(&registry)
 
         let runner = ApplicationRunner(
             identifier: App.identifier,
@@ -109,18 +172,24 @@ extension HydrogenCommand {
         )
 
         let requiredServicesCopy = requiredServices
+        let lifecycleServicesCopy = plan.lifecycleServices
 
         if lifecycleMode == .task {
             // Task mode: wrap execute in a CommandExecutionService.
             // We cannot capture `self` (non-Sendable existential) in a @Sendable closure,
             // so we resolve the execute closure into a concrete @Sendable wrapper.
-            try await _runAsTask(runner: runner, requiredServices: requiredServicesCopy)
+            try await _runAsTask(
+                runner: runner,
+                requiredServices: requiredServicesCopy,
+                lifecycleServices: lifecycleServicesCopy
+            )
         } else {
             // Persistent mode: services run until externally terminated.
             let noExecute: (@Sendable (ServiceValues) async throws -> Void)? = nil
             try await runner.run(
                 requiredServices: requiredServicesCopy,
                 mode: .persistent,
+                lifecycleServices: lifecycleServicesCopy,
                 execute: noExecute
             )
         }
@@ -132,7 +201,8 @@ extension HydrogenCommand {
     /// constrained to `Sendable` in the future if needed.
     private func _runAsTask(
         runner: ApplicationRunner,
-        requiredServices: [any ServiceKey.Type]
+        requiredServices: [any ServiceKey.Type],
+        lifecycleServices: [LifecycleService]
     ) async throws {
         // Build a Sendable-compatible capture by boxing the execute work.
         // Since HydrogenCommand does not require Sendable, we use @unchecked Sendable
@@ -145,6 +215,7 @@ extension HydrogenCommand {
         try await runner.run(
             requiredServices: requiredServices,
             mode: .task,
+            lifecycleServices: lifecycleServices,
             execute: executeClosure
         )
     }

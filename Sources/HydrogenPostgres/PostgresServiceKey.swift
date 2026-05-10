@@ -3,6 +3,8 @@
 //  swift-hydrogen
 //
 
+#if HYDROGEN_POSTGRES
+
 import Hydrogen
 import PostgresNIO
 
@@ -68,3 +70,5 @@ public func postgresServiceEntry() -> ConcreteServiceEntry<PostgresServiceKey> {
         return (value: client, service: client)
     }
 }
+
+#endif

@@ -3,6 +3,8 @@
 //  swift-hydrogen
 //
 
+#if HYDROGEN_POSTGRES
+
 import Configuration
 import HydrogenPostgres
 import PostgresNIO
@@ -154,3 +156,5 @@ struct PostgresConfigTests {
         #expect(pgConfig.options.maximumConnections == 30)
     }
 }
+
+#endif

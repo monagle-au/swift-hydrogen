@@ -9,6 +9,7 @@ import ArgumentParser
 import Configuration
 import Logging
 import ServiceLifecycle
+import Synchronization
 import Testing
 @testable import Hydrogen
 
@@ -453,6 +454,54 @@ struct ApplicationRunnerIntegrationTests {
         let zIdx = try #require(buildOrder.firstIndex(of: "z"))
         #expect(xIdx < yIdx)
         #expect(yIdx < zIdx)
+    }
+
+    /// Lifecycle services from a `BootstrapPlan` start ahead of user services
+    /// and finish in the same `ServiceGroup`.
+    @Test("Lifecycle services from BootstrapPlan are run by ApplicationRunner")
+    func bootstrapLifecycleServicesRun() async throws {
+        // A service that records when its run() is called. We verify both the
+        // bootstrap-injected service and the user service ran in the same
+        // group by waiting for both to log their start.
+        final class RanFlag: Sendable {
+            private let state = Mutex(false)
+            var ran: Bool { state.withLock { $0 } }
+            func mark() { state.withLock { $0 = true } }
+        }
+
+        struct FlaggingService: Service, Sendable {
+            let flag: RanFlag
+            func run() async throws {
+                flag.mark()
+                try await gracefulShutdown()
+            }
+        }
+
+        let exporterRan = RanFlag()
+        let exporter = FlaggingService(flag: exporterRan)
+        let lifecycle = LifecycleService(label: "exporter", mode: .persistent, service: exporter)
+
+        var registry = ServiceRegistry()
+        registry.register(
+            AKey.self,
+            entry: ConcreteServiceEntry<AKey>(label: "a", mode: .task) { _, _, _ in
+                (value: "a-value", service: QuickService())
+            }
+        )
+
+        let runner = makeRunner(registry: registry)
+        nonisolated(unsafe) var executed = false
+        try await runner.run(
+            requiredServices: [AKey.self],
+            mode: .task,
+            lifecycleServices: [lifecycle],
+            execute: { _ in
+                executed = true
+            }
+        )
+
+        #expect(executed == true)
+        #expect(exporterRan.ran == true)
     }
 
     /// Values produced by dependencies are visible to downstream services.

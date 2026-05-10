@@ -8,9 +8,11 @@ import Logging
 extension HydrogenApplication {
     /// Bootstrap `LoggingSystem` with the given factory.
     ///
-    /// `LoggingSystem.bootstrap(_:)` is a one-shot global — call this
-    /// once, before any `Logger` is constructed. The conventional
-    /// placement is the first line of an overridden `main()`:
+    /// `LoggingSystem.bootstrap(_:)` is a one-shot global. Prefer the
+    /// declarative path: build a ``BootstrapPlan`` from
+    /// ``HydrogenCommand/bootstrap(config:environment:)`` so CLI-flag values
+    /// like `--log-level` can drive the bootstrap. This static method is an
+    /// escape hatch for apps that override `main()`:
     ///
     /// ```swift
     /// @main
@@ -36,6 +38,10 @@ extension HydrogenApplication {
     /// set by request-scoping middleware. Without one, only metadata
     /// the caller passes via `logger.info(metadata:)` is included.
     ///
+    /// This method routes through ``BootstrapCoordinator/shared``, so a
+    /// later call to ``HydrogenCommand/bootstrap(config:environment:)``
+    /// from inside the same process won't re-install logging.
+    ///
     /// - Parameters:
     ///   - factory: Produces the `LogHandler` for each new logger. The
     ///     closure runs once per logger label, the first time that
@@ -46,36 +52,16 @@ extension HydrogenApplication {
     ///   - logLevel: Default level applied to every handler this
     ///     bootstrap produces. When `nil`, ``HydrogenLogging/resolveLogLevel(envVar:)``
     ///     reads the `LOG_LEVEL` env var; if that's also unset or unparseable,
-    ///     `.info` is used. Bootstrap-time only — apps can still scope a
-    ///     narrower level on individual `Logger` instances.
+    ///     `.info` is used.
     public static func bootstrapLogging(
         using factory: @escaping LogHandlerFactory = HydrogenLogging.cloudRunOrStream.asFactory,
         metadataProvider: Logger.MetadataProvider? = nil,
         logLevel: Logger.Level? = nil
     ) {
-        let resolvedLevel = logLevel ?? HydrogenLogging.resolveLogLevel() ?? .info
-        // Wrap the caller-supplied factory so every handler gets the
-        // resolved level applied at construction. `LogHandler.logLevel`
-        // is `var` on the protocol — assignment after init is the
-        // documented swift-log path for level overrides.
-        let leveledFactory: LogHandlerFactory = { label in
-            var handler = factory(label)
-            handler.logLevel = resolvedLevel
-            return handler
-        }
-        if let metadataProvider {
-            // The (label, provider) factory overload is the swift-log
-            // path that wires the global provider through to each
-            // Logger. We discard the per-call provider argument because
-            // our `LogHandlerFactory` shape only takes a label — swift-
-            // log applies the global provider at log call time anyway,
-            // independent of whether the handler knows about it.
-            LoggingSystem.bootstrap(
-                { label, _ in leveledFactory(label) },
-                metadataProvider: metadataProvider
-            )
-        } else {
-            LoggingSystem.bootstrap(leveledFactory)
-        }
+        var plan = BootstrapPlan()
+        plan.logHandlerFactory = factory
+        plan.logLevel = logLevel
+        plan.loggerMetadataProvider = metadataProvider
+        BootstrapCoordinator.shared.apply(plan)
     }
 }
